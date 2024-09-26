@@ -78,20 +78,41 @@ gcomp_glm_mod = function(outcome_data, Q0_mod)
               Q0W = Q0W ))
 }
 
-# output ACE effects from g computation results 
-produce_ACE_from_gcomp = function(g_comp, ACE_type)
+get_ACEs_gcomp = function(data0,data1 = NULL, data2 = NULL, 
+                          formula, family, pred_ids = NULL)
 {
-  EY1 = mean(g_comp$Q1W)
-  EY0 = mean(g_comp$Q0W)
-  ACE = 0 
-  if(ACE_type == "ATE" )
+  if(is.null(pred_ids))
   {
-    ACE = EY1 - EY0
-  }else
-  {
-    ACE = (EY1 / (1-EY1)) / (EY0 / (1-EY0))
+    pred_ids = list(NULL,NULL, NULL)
   }
-  return(ACE)
+  
+  
+  gcomp_0 = gcomp(outcome_data = data0, 
+                         family = family,
+                         formula = formula, 
+                         pred_ids = pred_ids[[1]])
+  E01  = mean(gcomp_0$Q1W); E00 = mean(gcomp_0$Q0W)
+  
+  gcomp_1 = gcomp(outcome_data = {if(is.null(data1)){data0}else{data1}}, 
+                         family = family,
+                         formula = formula, 
+                         pred_ids = pred_ids[[2]])
+  E11  = mean(gcomp_1$Q1W); E10 = mean(gcomp_1$Q0W)
+  
+  gcomp_2 = gcomp(outcome_data = {if(is.null(data2)){data0}else{data2}}, 
+                         family = family,
+                         formula = formula, 
+                         pred_ids = pred_ids[[3]])
+  E21  = mean(gcomp_2$Q1W); E20 = mean(gcomp_2$Q0W)
+  
+  ATE = c(E01 - E00, E11 - E10, E21 - E20)
+  
+  MOR = c( (E01 / (1-E01)) / (E00 / (1 - E00)), 
+                  (E11 / (1 - E11)) / (E10 / (1-E10)), 
+                  (E21 / (1- E21)) / (E20 / (1 - E20)))
+  
+  return(list(ATE = ATE, 
+              MOR = MOR))
 }
 
 # used to find A effects for generating data according to prespecified ATE levels
@@ -192,8 +213,8 @@ gen_A_prop_int_effect =  function(n = 1000000, n_snp = 10,
   # GENERATE CONFOUNDING DATA WITH NONLINEAR CONFOUNDING
   ###########################################################################
   age = rnorm(n, mean = 50, sd = 5)
-  sex = sample(c(0,1), size = n, replace = T)
-  cohort = sample(1:5, size = n, replace = T) %>% factor 
+  sex = sample(c(0,1), size = n, prob = c(.7,.3), replace = T)
+  cohort = sample(1:5, size = n, prob = c(.2, .2, .4,.1,.1), replace = T) %>% factor 
   ancestry_1 = rnorm(n, mean = 0, sd = 1)
   ancestry_2 = rnorm(n, mean = 0, sd = 1)
   
@@ -329,9 +350,9 @@ gen_A_prop_int_effect =  function(n = 1000000, n_snp = 10,
 
   colnames(data)[3:(3+n_snp - 1)] = paste0("X",1:n_snp )
   
-  data_subset_0 = data[which(data$X1 == 0), -3]
-  data_subset_1 = data[which(data$X1 == 1), -3]
-  data_subset_2 = data[which(data$X1 == 2), -3]
+  data_subset_0 = data[which(data$X1 == 0), ]
+  data_subset_1 = data[which(data$X1 == 1), ]
+  data_subset_2 = data[which(data$X1 == 2), ]
   
   formula = update(confounder_data_outcome_formula, 
                 formula(paste0("Y ~ A + ", paste0("X", 2:n_snp, collapse = "+"), "+ .")))
@@ -430,8 +451,8 @@ gen_data_ACE = function(n = 1000, n_snp = 10,
   # GENERATE CONFOUNDING DATA WITH NONLINEAR CONFOUNDING
   ###########################################################################
   age = rnorm(n, mean = 50, sd = 5)
-  sex = sample(c(0,1), size = n, replace = T)
-  cohort = sample(1:5, size = n, replace = T) %>% factor 
+  sex = sample(c(0,1), size = n, prob = c(.7,.3), replace = T)
+  cohort = sample(1:5, size = n, prob = c(.2, .2, .4,.1,.1), replace = T) %>% factor 
   ancestry_1 = rnorm(n, mean = 0, sd = 1)
   ancestry_2 = rnorm(n, mean = 0, sd = 1)
   
@@ -462,11 +483,14 @@ gen_data_ACE = function(n = 1000, n_snp = 10,
   }
   
   confounder_data_outcome = model.matrix(confounder_data_outcome_formula, 
-                                         data = cbind(A = exposure_data , confounder_data_orig))[,-1]
+                                         data = cbind(A = exposure_data , confounder_data_orig, 
+                                                      X1 = snp_data[,1]))[,-1]
   confounder_data_outcome_0 = model.matrix(confounder_data_outcome_formula, 
-                                           data = cbind(A = 0, confounder_data_orig))[,-1]
+                                           data = cbind(A = 0, confounder_data_orig, 
+                                                        X1 = snp_data[,1]))[,-1]
   confounder_data_outcome_1 = model.matrix(confounder_data_outcome_formula, 
-                                           data = cbind(A = 1, confounder_data_orig))[,-1]
+                                           data = cbind(A = 1, confounder_data_orig, 
+                                                        X1 = snp_data[,1]))[,-1]
   
   ###########################################################################
   
@@ -616,15 +640,43 @@ tmle_comparison_1snp = function(num_sims = 1000,
                                                           "SL.glmnet", 
                                                           "SL.ranger", 
                                                           "SL.xgboost"), 
-                                propensity_formula = NULL, 
+                                propensity_formula = NULL,
+                                outcome_formula = NULL, 
                                 future.seed = T)
 # if W_exposure_null / W_outcome_null is true, fit propoensity / outcome model with no 
 # confounders
 {
+  # save the args to output so can reference later 
+  args = list(num_sims = num_sims, 
+              n_smp = n_smp, 
+              n_snp = n_snp,
+              family = family,
+              snps_propensity = snps_propensity, 
+              snp_propensity_effects = snp_propensity_effects,
+              exposure_prev = exposure_prev, 
+              SNP_MAF = SNP_MAF,
+              SNP1_intercept_effs = SNP1_intercept_effs, 
+              SNP_adj_effs_0 = SNP_adj_effs_0, 
+              SNP_adj_effs_1 = SNP_adj_effs_1,
+              SNP_adj_effs_2 = SNP_adj_effs_2,
+              ACE_type = ACE_type,
+              ACE = ACE,
+              rho = rho, 
+              W_exposure_null = W_exposure_null, 
+              W_outcome_null = W_outcome_null, 
+              TMLE_args_list = TMLE_args_list, 
+              confounder_data_propensity_formula = confounder_data_propensity_formula, 
+              confounder_propensity_effects = confounder_propensity_effects, 
+              confounder_data_outcome_formula= confounder_data_outcome_formula, 
+              confounder_outcome_effects = confounder_outcome_effects, 
+              propensity_SL.library = propensity_SL.library, 
+              propensity_formula = propensity_formula,
+              outcome_formula = outcome_formula, 
+              future.seed = future.seed)
   
   p = progressor(steps = num_sims)
   
-  # J is used in W exposure and W outcome 
+  # J is used to define the SNP of interest
   j = 1 
   
   # need to set seed for generating A_prop_int_effects
@@ -673,11 +725,11 @@ tmle_comparison_1snp = function(num_sims = 1000,
     
     ############################################################################
     # Diagnostic plots for simulated data ######################################
-    # table(data$Y)
-    # plot(density(predict(glm(A ~ . - Y, data = data, family = "binomial"),
-    #                      type = "response")))
-    # summary(predict(glm(A ~ . - Y, data = data, family = "binomial"), 
-    #                 type = "response"))
+    table(data$Y)
+    plot(density(predict(glm(A ~ . - Y, data = data, family = "binomial"),
+                         type = "response")))
+    summary(predict(glm(A ~ . - Y, data = data, family = "binomial"),
+                    type = "response"))
     ############################################################################
     
     # tests for power 
@@ -690,11 +742,6 @@ tmle_comparison_1snp = function(num_sims = 1000,
         oracle_formula <- update(confounder_data_outcome_formula, as.formula(formula_string))
         oracle_mod = glm(oracle_formula, data = data, family = family)
         
-      # oracle model w/o SNPS #######################################################
-        
-        oracle_formula_no_snp <- update(confounder_data_outcome_formula, Y ~ A*X1 + .)
-        oracle_mod_no_snp = glm(oracle_formula_no_snp, data = data, family = family)
-      
       # gxe 1df ################################################################
         glm_formula_std = formula(paste0("Y ~ A*X", j, "+  age +sex + cohort + ancestry_1 + ancestry_2"))
         standard_GxE_mod = glm(glm_formula_std, data = data, family = family,)
@@ -716,6 +763,7 @@ tmle_comparison_1snp = function(num_sims = 1000,
         # to turn cohort into categorical for tmle
         tmle_data = model.matrix( ~ . , data)[,-1] %>% data.frame()
         
+        # tmle with superlearner for propensity 
         tmle_mod = tmle_gxe(Y = tmle_data$Y,
                             A = tmle_data$A, 
                             G = tmle_data[,3:12], 
@@ -723,13 +771,13 @@ tmle_comparison_1snp = function(num_sims = 1000,
                             family = family,
                             case_control_design = F, 
                             disease_prevalence = NULL,
-                            weights = NULL, 
+                            obs.weights = NULL, 
                             propensity_SL.library = propensity_SL.library, 
                             propensity_SL.cvControl = list(V = 10L, 
                                                            stratifyCV = T, 
                                                            shuffle = TRUE, 
                                                            validRows = NULL), 
-                            include_G_propensity = F,
+                            include_G_propensity = T,
                             include_W_outcome = T, 
                             TMLE_args_list = TMLE_args_list,
                             SNP_results = 1,
@@ -737,170 +785,145 @@ tmle_comparison_1snp = function(num_sims = 1000,
                             ncores = NULL, 
                             progress = F, 
                             verbose = F)[,1, drop = F]
+        # tmle with correct specification for propensity and outcome 
+        
+        tmle_oracle_mod = tmle_gxe(Y = tmle_data$Y,
+                                   A = tmle_data$A, 
+                                   G = tmle_data[,3:12], 
+                                   W = tmle_data[, -c(1:2, 3:12)], 
+                                   family = family,
+                                   case_control_design = F, 
+                                   disease_prevalence = NULL,
+                                   obs.weights = NULL, 
+                                   propensity_SL.library = propensity_SL.library, 
+                                   propensity_SL.cvControl = list(V = 10L, 
+                                                                  stratifyCV = T, 
+                                                                  shuffle = TRUE, 
+                                                                  validRows = NULL), 
+                                   include_G_propensity = T,
+                                   include_W_outcome = T, 
+                                   propensity_formula = propensity_formula, 
+                                   outcome_formula = outcome_formula, 
+                                   TMLE_args_list = TMLE_args_list,
+                                   SNP_results = 1,
+                                   parallel = F,
+                                   ncores = NULL, 
+                                   progress = F, 
+                                   verbose = F)[,1, drop = F]
+        
+        if(is.na(tmle_oracle_mod["MOR_EM_mult_baseline_est",1]))
+        {
+          saveRDS(data, file = "~/Desktop/USC/Targeted Learning/Simulations_Manuscript/tlgxe_simulations/debug_data_9_20_24.RDS")
+        }
+        
     
     # bias tests 
       # oracle -- gcomp with correct outcome formula 
         # gcomp for 3 levels of X1 
         
-        gcomp_oracle_0 = gcomp(outcome_data = data, 
-                               family = family,
-                               formula = oracle_formula, 
-                               pred_ids = which(data$X1 == 0))
-        E01  = mean(gcomp_oracle_0$Q1W); E00 = mean(gcomp_oracle_0$Q0W)
+        gcomp_oracle_ACEs = get_ACEs_gcomp(data0 = data, formula = oracle_formula, family = family, 
+                                           pred_ids = list(
+                                             which(data$X1 == 0), 
+                                             which(data$X1 == 1), 
+                                             which(data$X1 == 2)
+                                           ))
         
-        gcomp_oracle_1 = gcomp(outcome_data = data, 
-                               family = family,
-                               formula = oracle_formula, 
-                               pred_ids = which(data$X1 == 1))
-        E11  = mean(gcomp_oracle_1$Q1W); E10 = mean(gcomp_oracle_1$Q0W)
-        
-        gcomp_oracle_2 = gcomp(outcome_data = data, 
-                               family = family,
-                               formula = oracle_formula, 
-                               pred_ids = which(data$X1 == 2))
-        E21  = mean(gcomp_oracle_2$Q1W); E20 = mean(gcomp_oracle_2$Q0W)
-        
-        oracle_ATE = c(E01 - E00, E11 - E10, E21 - E20)
-        
-        oracle_MOR = c( (E01 / (1-E01)) / (E00 / (1 - E00)), 
-                        (E11 / (1 - E11)) / (E10 / (1-E10)), 
-                        (E21 / (1- E21)) / (E20 / (1 - E20)))
-        
-     # oracle -- gcomp with correct outcome formula, no other snps included 
-        # gcomp for 3 levels of X1 
-        
-        gcomp_oracle_no_snp_0 = gcomp(outcome_data = data, 
-                               family = family,
-                               formula = oracle_formula_no_snp, 
-                               pred_ids = which(data$X1 == 0))
-        E01  = mean(gcomp_oracle_no_snp_0$Q1W); E00 = mean(gcomp_oracle_no_snp_0$Q0W)
-        
-        gcomp_oracle_no_snp_1 = gcomp(outcome_data = data, 
-                               family = family,
-                               formula = oracle_formula_no_snp, 
-                               pred_ids = which(data$X1 == 1))
-        E11  = mean(gcomp_oracle_no_snp_1$Q1W); E10 = mean(gcomp_oracle_no_snp_1$Q0W)
-        
-        gcomp_oracle_no_snp_2 = gcomp(outcome_data = data, 
-                               family = family,
-                               formula = oracle_formula_no_snp, 
-                               pred_ids = which(data$X1 == 2))
-        E21  = mean(gcomp_oracle_no_snp_2$Q1W); E20 = mean(gcomp_oracle_no_snp_2$Q0W)
-        
-        oracle_no_snp_ATE = c(E01 - E00, E11 - E10, E21 - E20)
-        
-        oracle_no_snp_MOR = c( (E01 / (1-E01)) / (E00 / (1 - E00)), 
-                        (E11 / (1 - E11)) / (E10 / (1-E10)), 
-                        (E21 / (1- E21)) / (E20 / (1 - E20)))
-        
-        # oracle -- gcomp with correct outcome formula at each level of X1 = 0,1,2
-        # gcomp for 3 levels of X1 
-        
-        gcomp_oracle_3lvl_0 = gcomp(outcome_data = data[which(data$X1 == 0), ], 
-                                      family = family,
-                                      formula = oracle_formula_no_snp)
-        E01  = mean(gcomp_oracle_3lvl_0$Q1W); E00 = mean(gcomp_oracle_3lvl_0$Q0W)
-        
-        gcomp_oracle_3lvl_1 = gcomp(outcome_data = data[which(data$X1 == 1), ], 
-                                      family = family,
-                                      formula = oracle_formula_no_snp)
-        E11  = mean(gcomp_oracle_3lvl_1$Q1W); E10 = mean(gcomp_oracle_3lvl_1$Q0W)
-        
-        gcomp_oracle_3lvl_2 = gcomp(outcome_data = data[which(data$X1 == 2), ], 
-                                      family = family,
-                                      formula = oracle_formula_no_snp)
-        
-        E21  = mean(gcomp_oracle_3lvl_2$Q1W); E20 = mean(gcomp_oracle_3lvl_2$Q0W)
-        
-        oracle_3lvl_ATE = c(E01 - E00, E11 - E10, E21 - E20)
-        
-        oracle_3lvl_MOR = c( (E01 / (1-E01)) / (E00 / (1 - E00)), 
-                               (E11 / (1 - E11)) / (E10 / (1-E10)), 
-                               (E21 / (1- E21)) / (E20 / (1 - E20)))
+        oracle_ATE = gcomp_oracle_ACEs$ATE
+        oracle_MOR = gcomp_oracle_ACEs$MOR
         
       # gcomp -- compute ACE for SNP X1 = 0, 1, 2 w/o other SNPs, include confounders 
         
-        gcomp_0 = gcomp(outcome_data = data[which(data$X1 == 0), ], 
-                            family = family,
-                            formula = glm_formula_std)
+        # gcomp_ACEs = get_ACEs_gcomp(data0 = data[which(data$X1 == 0), ],
+        #                             data1 = data[which(data$X1 == 1), ], 
+        #                             data2 = data[which(data$X1 == 2), ],
+        #                               formula = glm_formula_std, family = family, 
+        #                                    pred_ids = NULL)
+        # 
+        # 
+        # gcomp_ATE = gcomp_ACEs$ATE
+        # 
+        # gcomp_MOR = gcomp_ACEs$MOR
         
-        E01  = mean(gcomp_0$Q1W); E00 = mean(gcomp_0$Q0W)
-        
-        gcomp_1 = gcomp(outcome_data = data[which(data$X1 == 1), ], 
-                            family = family,
-                            formula = glm_formula_std)
-        E11  = mean(gcomp_1$Q1W); E10 = mean(gcomp_1$Q0W)
-        
-        gcomp_2 = gcomp(outcome_data = data[which(data$X1 == 2), ], 
-                            family = family,
-                            formula = glm_formula_std)
-        E21  = mean(gcomp_2$Q1W); E20 = mean(gcomp_2$Q0W)
-        
-        gcomp_ATE = c(E01 - E00, E11 - E10, E21 - E20)
-        
-        gcomp_MOR = c( (E01 / (1-E01)) / (E00 / (1 - E00)), 
-                     (E11 / (1 - E11)) / (E10 / (1-E10)), 
-                     (E21 / (1- E21)) / (E20 / (1 - E20))
-        )  
       # iptw -- compute ACE for SNP X1 = 0, 1, 2 w/o other SNPs, include confounders 
         
-        # X1 = 0 
-        ipw_weights_0 = ipwpoint(exposure = A, 
-                                 family = "binomial", link = "logit", 
-                               denominator = ~  age +sex + cohort + ancestry_1 + ancestry_2, 
-                               data = data[which(data$X1 == 0), ])$ipw.weights
+        # E = matrix(nrow = 3, ncol = 2)
+        # 
+        # for(i in 1:3)
+        # {
+        #   ipw_weights_i = ipwpoint(exposure = A, 
+        #                            family = "binomial", link = "logit", 
+        #                            denominator = ~  age +sex + cohort + ancestry_1 + ancestry_2, 
+        #                            data = data[which(data$X1 == (i-1)), ])$ipw.weights
+        #   
+        #   
+        #   suppressWarnings(iptw_i <- glm(Y ~ A, data = data[which(data$X1 == (i - 1)), ], 
+        #                                  family = family, weights = ipw_weights_i))
+        #   E[i, ] = c((iptw_i$coefficients %>% sum), iptw_i$coefficients[1])
+        # }
+        # 
+        # if(family == "binomial")
+        # {
+        #   E = plogis(E)
+        # }
+        # 
+        # E01 = E[1,1]; E00 = E[1,2]
+        # E11 = E[2,1]; E10 = E[2,2]
+        # E21 = E[3,1]; E20 = E[3,2]
+        # 
+        # iptw_ATE = c(E01 - E00, E11 - E10, E21 - E20) %>% as.numeric
+        # 
+        # iptw_MOR = c( (E01 / (1-E01)) / (E00 / (1 - E00)), 
+        #                (E11 / (1 - E11)) / (E10 / (1-E10)), 
+        #                (E21 / (1- E21)) / (E20 / (1 - E20))
+        # )  %>% as.numeric
         
+        # gxe 1df ################################################################
         
-        suppressWarnings(iptw_0 <- glm(Y ~ A, data = data[which(data$X1 == 0), ], 
-                     family = family, weights = ipw_weights_0))
-        
-        E01  = (iptw_0$coefficients %>% sum) ; E00 = iptw_0$coefficients[1]
-        
-        # X1 = 1
-        ipw_weights_1 = ipwpoint(exposure = A, 
-                                 family = "binomial", link = "logit", 
-                                 denominator = ~  age +sex + cohort + ancestry_1 + ancestry_2, 
-                                 data = data[which(data$X1 == 1), ])$ipw.weights
-        
-        
-        suppressWarnings(iptw_1 <- glm(Y ~ A, data = data[which(data$X1 == 1), ], 
-                                       family = family, weights = ipw_weights_1))
-        
-        E11  = (iptw_1$coefficients %>% sum) ; E10 = iptw_1$coefficients[1]
-        
-        # X1 = 2
-        ipw_weights_2 = ipwpoint(exposure = A, 
-                                 family = "binomial", link = "logit", 
-                                 denominator = ~  age +sex + cohort + ancestry_1 + ancestry_2, 
-                                 data = data[which(data$X1 == 2), ])$ipw.weights
-        
-        
-        suppressWarnings(iptw_2 <- glm(Y ~ A, data = data[which(data$X1 == 2), ], 
-                                       family = family, weights = ipw_weights_2))
-        
-        E21  = (iptw_2$coefficients %>% sum) ; E20 = iptw_2$coefficients[1]
-
+        gxe_1df_MOR = NULL
+        gxe_1df_ATE = NULL
         
         if(family == "binomial")
         {
-          E01 = plogis(E01); E00 = plogis(E00)
-          E11 = plogis(E11); E10 = plogis(E10)
-          E21 = plogis(E21); E20 = plogis(E20)
+          gxe_1df_MOR = c(standard_GxE_mod$coefficients["A"], 
+                          standard_GxE_mod$coefficients["A"] + standard_GxE_mod$coefficients["A:X1"], 
+                          standard_GxE_mod$coefficients["A"] + 2*standard_GxE_mod$coefficients["A:X1"]) %>% 
+            exp
+        }else
+        {
+          gxe_1df_ATE = c(standard_GxE_mod$coefficients["A"], 
+                          standard_GxE_mod$coefficients["A"] + standard_GxE_mod$coefficients["A:X1"], 
+                          standard_GxE_mod$coefficients["A"] + 2*standard_GxE_mod$coefficients["A:X1"]) 
         }
         
-        iptw_ATE = c(E01 - E00, E11 - E10, E21 - E20) %>% as.numeric
         
-        iptw_MOR = c( (E01 / (1-E01)) / (E00 / (1 - E00)), 
-                       (E11 / (1 - E11)) / (E10 / (1-E10)), 
-                       (E21 / (1- E21)) / (E20 / (1 - E20))
-        )  %>% as.numeric
+        # gxe 2df ################################################################
+        
+        gxe_2df_MOR = NULL
+        gxe_2df_ATE = NULL
+        
+        if(family == "binomial")
+        {
+          gxe_2df_MOR = c(glm_int$coefficients["A"], 
+                          glm_int$coefficients["A"] + glm_int$coefficients["A:factor(X1)1"], 
+                          glm_int$coefficients["A"] + glm_int$coefficients["A:factor(X1)2"]) %>% 
+            exp
+        }else
+        {
+          gxe_2df_ATE = c(glm_int$coefficients["A"], 
+                          glm_int$coefficients["A"] + glm_int$coefficients["A:factor(X1)1"], 
+                          glm_int$coefficients["A"] + glm_int$coefficients["A:factor(X1)2"]) 
+        }
+        
 
     power = c(tmle_ATE = ifelse(tmle_mod["ATE_EM_pvalue",1] < 0.05, 1, 0) %>% as.numeric,
               tmle_ATE_linear = ifelse(tmle_mod["ATE_EM_lin_pvalue",1] < 0.05, 1, 0)%>% as.numeric,
+              tmle_oracle_ATE = ifelse(tmle_oracle_mod["ATE_EM_pvalue",1] < 0.05, 1, 0) %>% as.numeric, 
+              tmle_oracle_ATE_linear = ifelse(tmle_oracle_mod["ATE_EM_lin_pvalue",1] < 0.05, 1, 0)%>% as.numeric,
               tmle_MOR = ifelse(tmle_mod["MOR_EM_pvalue",1] < 0.05, 1, 0)%>% as.numeric,
               tmle_MOR_mult = ifelse(tmle_mod["MOR_EM_mult_pvalue",1] < 0.05, 1, 0)%>% as.numeric,
-              oracle_mod = ifelse(summary(oracle_mod)$coefficients["A:X1", 4] < 0.05, 1, 0)%>% as.numeric,
-              oracle_no_snp = ifelse(summary(oracle_mod_no_snp)$coefficients["A:X1", 4] < 0.05, 1, 0)%>% as.numeric,
+              tmle_oracle_MOR = ifelse(tmle_oracle_mod["MOR_EM_pvalue",1] < 0.05, 1, 0)%>% as.numeric,
+              tmle_oracle_MOR_mult = ifelse(tmle_oracle_mod["MOR_EM_mult_pvalue",1] < 0.05, 1, 0)%>% as.numeric,
+              gcomp_oracle_mod = ifelse(summary(oracle_mod)$coefficients["A:X1", 4] < 0.05, 1, 0)%>% as.numeric,
               gxe_1df = glm_1df_power%>% as.numeric,
               gxe_2df = ifelse(lr_test$`Pr(>Chisq)`[2] < 0.05, 1, 0)%>% as.numeric)
     
@@ -908,22 +931,31 @@ tmle_comparison_1snp = function(num_sims = 1000,
                     TMLE_linear = c(tmle_mod["ATE_EM_lin_baseline_est",1],
                                     tmle_mod["ATE_EM_lin_baseline_est",1] + tmle_mod["ATE_EM_lin_est",1] , 
                                     tmle_mod["ATE_EM_lin_baseline_est",1] + 2*tmle_mod["ATE_EM_lin_est",1]),
-                    oracle_ATE = oracle_ATE,
-                    oracle_no_snp_ATE = oracle_no_snp_ATE, 
-                    oracle_3lvl_ATE = oracle_3lvl_ATE,
-                    gcomp_ATE = gcomp_ATE, 
-                    iptw_ATE = iptw_ATE
+                    TMLE_oracle = c(tmle_oracle_mod[1],tmle_oracle_mod[2], tmle_oracle_mod[3]), 
+                    TMLE_oracle_linear = c(tmle_oracle_mod["ATE_EM_lin_baseline_est",1],
+                                           tmle_oracle_mod["ATE_EM_lin_baseline_est",1] + tmle_oracle_mod["ATE_EM_lin_est",1] , 
+                                           tmle_oracle_mod["ATE_EM_lin_baseline_est",1] + 2*tmle_oracle_mod["ATE_EM_lin_est",1]),
+                    gcomp_oracle_ATE = oracle_ATE,
+                    # gcomp_ATE = gcomp_ATE, 
+                    # iptw_ATE = iptw_ATE, 
+                    gxe_1df_ATE = gxe_1df_ATE,  
+                    gxe_2df_ATE = gxe_2df_ATE
                     )
     
     MOR_res = rbind(TMLE = c(tmle_mod[7],tmle_mod[8], tmle_mod[9]), 
+                    TMLE_oracle = c(tmle_oracle_mod[7],tmle_oracle_mod[8], tmle_oracle_mod[9]), 
                     TMLE_mult = c(tmle_mod["MOR_EM_mult_baseline_est",1], 
                                   tmle_mod["MOR_EM_mult_baseline_est",1] * tmle_mod["MOR_EM_mult_est",1], 
                                   tmle_mod["MOR_EM_mult_baseline_est",1] * tmle_mod["MOR_EM_mult_est",1]^2), 
-                    oracle_MOR = oracle_MOR,
-                    oracle_no_snp_MOR = oracle_no_snp_MOR,
-                    oracle_3lvl_MOR = oracle_3lvl_MOR,
-                    gcomp_MOR = gcomp_MOR,
-                    iptw_MOR = iptw_MOR)
+                    TMLE_oracle_mult = c(tmle_oracle_mod["MOR_EM_mult_baseline_est",1], 
+                                         tmle_oracle_mod["MOR_EM_mult_baseline_est",1] * tmle_oracle_mod["MOR_EM_mult_est",1], 
+                                         tmle_oracle_mod["MOR_EM_mult_baseline_est",1] * tmle_oracle_mod["MOR_EM_mult_est",1]^2),
+                    gcomp_oracle_MOR = oracle_MOR,
+                    # gcomp_MOR = gcomp_MOR,
+                    # iptw_MOR = iptw_MOR, 
+                    gxe_1df_MOR = gxe_1df_MOR, 
+                    gxe_2df_MOR = gxe_2df_MOR
+                    )
     
     ACE_res = list(signif = power, ATE_res = ATE_res, 
                    MOR_res = MOR_res)
@@ -937,7 +969,7 @@ tmle_comparison_1snp = function(num_sims = 1000,
   
   # PROCESS Power 
   
-  power = sapply(EM, "[[", 1) %>% t %>% colMeans(na.rm = T) # na.RM is for MOR_mult that sometimes 
+  power = sapply(EM, "[[", 1) %>% t %>% colMeans 
   # is NA
   
   # Process bias and MSE estimates 
@@ -997,11 +1029,15 @@ tmle_comparison_1snp = function(num_sims = 1000,
     
     EM_P = ggarrange(power_plot, MOR_plot, ncol = 2)
     
-    # make bias plot 
     bias_mean_data = tapply(MOR_long_estimates$MOR, list(MOR_long_estimates$EM_level, 
+                                                                 MOR_long_estimates$method), mean)%>% t %>% data.frame 
+
+    abs_bias_mean_data = tapply(MOR_long_estimates$MOR %>% abs, list(MOR_long_estimates$EM_level, 
                                                     MOR_long_estimates$method), mean)%>% t %>% data.frame 
+    sd_data = tapply(MOR_long_estimates$MOR, list(MOR_long_estimates$EM_level, 
+                                                                 MOR_long_estimates$method), sd)%>% t %>% data.frame
     
-    bias_se_data = tapply(MOR_long_estimates$MOR, list(MOR_long_estimates$EM_level, 
+    rmse_data = tapply((MOR_long_estimates$MOR)^2, list(MOR_long_estimates$EM_level, 
                                                        MOR_long_estimates$method), sd)%>% t %>% data.frame 
     # bias_data$method = rownames(bias_data) %>% factor
     # 
@@ -1019,8 +1055,11 @@ tmle_comparison_1snp = function(num_sims = 1000,
     return_list = list(power = power, EM_P = EM_P, 
                        true_ACEs = true_ACEs, 
                        A_effects = A_prop_int_effects$A_effects, 
-                       bias_mean_data = bias_mean_data, 
-                       bias_se_data = bias_se_data)
+                       bias_mean_data = bias_mean_data,
+                       abs_bias_mean_data = abs_bias_mean_data, 
+                       sd_data = sd_data, 
+                       rmse_data = rmse_data, 
+                       simulation_arugments = args)
   }else
   {
     methods_ATE = EM[[1]]$ATE_res %>% rownames
@@ -1049,8 +1088,12 @@ tmle_comparison_1snp = function(num_sims = 1000,
     
     bias_mean_data = tapply(ATE_long_estimates$ATE, list(ATE_long_estimates$EM_level, 
                                                          ATE_long_estimates$method), mean)%>% t %>% data.frame 
+    abs_bias_mean_data = tapply(ATE_long_estimates$ATE %>% abs, list(ATE_long_estimates$EM_level, 
+                                                                 ATE_long_estimates$method), mean)%>% t %>% data.frame 
+    sd_data = tapply(ATE_long_estimates$ATE, list(ATE_long_estimates$EM_level, 
+                                                           ATE_long_estimates$method), sd)%>% t %>% data.frame 
     
-    bias_se_data = tapply(ATE_long_estimates$ATE, list(ATE_long_estimates$EM_level, 
+    rmse_data = tapply((ATE_long_estimates$ATE)^2, list(ATE_long_estimates$EM_level, 
                                                        ATE_long_estimates$method), sd)%>% t %>% data.frame 
     
     
@@ -1059,13 +1102,16 @@ tmle_comparison_1snp = function(num_sims = 1000,
     return_list = list(power = power, EM_P = EM_P, 
                        true_ACEs = true_ACEs, 
                        A_effects = A_prop_int_effects$A_effects, 
-                       bias_mean_data = bias_mean_data, 
-                       bias_se_data = bias_se_data)
+                       bias_mean_data = bias_mean_data,
+                       abs_bias_mean_data = abs_bias_mean_data, 
+                       sd_data = sd_data, 
+                       simulation_arugments = args)
   }
   
   
   return(return_list)
 }
+
 
 output_results = function(sim)
 {
