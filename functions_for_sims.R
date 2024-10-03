@@ -1156,11 +1156,25 @@ process_sim_results = function(sim_results)
               power_data = power))
 }
 
-process_power_plots = function(sim)
+process_power_plots = function(sim, ACE = "MOR")
 {
   power_data = sapply(sim, "[[", 1) %>% t
   
-  power_data = cbind(sim_num = 1:nrow(power_data), power_data)
+  rm_cols = NULL
+  
+  if(ACE == "MOR")
+  {
+    rm_cols = 1:4
+  }else
+  {
+    rm_cols = 5:8
+  }
+  
+  power_data = power_data[, -rm_cols] 
+  
+  
+  power_data = cbind(sim_num = 1:nrow(power_data), power_data) 
+
   
   power_data = power_data %>% data.frame %>% pivot_longer(cols =2:ncol(power_data), 
                                                           names_to = "method", 
