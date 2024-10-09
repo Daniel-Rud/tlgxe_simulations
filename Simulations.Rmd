@@ -38,16 +38,16 @@ num_sims = 1000
 Set globally the learners in the superlearner for the propensity 
 
 ```{r}
-# propensity_SL.library = c(
-#   "SL.glmnet",
-#   "SL.bartMachine",
-#   "SL.rpart"
-# )
-
 propensity_SL.library = c(
   "SL.glmnet",
+  "SL.bartMachine",
   "SL.rpart"
 )
+
+# propensity_SL.library = c(
+#   "SL.glmnet",
+#   "SL.rpart"
+# )
 
 # propensity_SL.library = c("SL.glmnet", "SL.randomForest", "SL.rpart", "SL.bartMachine" )
 
@@ -76,59 +76,13 @@ TMLE_args_list = list(
   npv_thresh = (5/sqrt(n_smp))/log(n_smp), 
   near_positivity_method = "trim", 
   nfolds_cv_Q_init = 10, 
-  nfolds_cv_glmnet_propensity = 3, 
   nfolds_cv_glmnet_outcome = 3,
   alpha_outcome = .5, 
-  alpha_propensity = .5, 
-  clever_cov_propensity_wt = T
+  clever_cov_propensity_wt = T,
+  outcome_SL.library = NULL, 
+  outcome_SL.cvControl = NULL
 )
 ```
-
-
-Questions: 
-1) Do we want to have section for epistatic effects? 
-
-ans: discussion point, other sources of bias more interesting
-
-2) What is the final list of learners in the superlearner? have been using glmnet, rpart-prune, bart machine 
-
- ans: discussion point, choice of learners not trivial as standard literature says, T1ERR infl, cite priv comm with van der laan 
-
-3) do we want simulations that iterate over MAF? 
- 
- ans: No, choose one that is not the easiest one dont use .25, .5, .25 case 
-SNP X1 = 0,1,2 = (.64,.32 .04)
-
-4) In the bias simulations, we can either fix the confounding SNP effects of the adjusting SNPs, or can vary them to have larger effects in simulations of "higher" confounding.  Do we want to vary this too, or just vary the degree of nonlinear confounding?  The 1df and 2df gxe models, that do not adjust for other SNPs, will suffer from increased confounding (which amounts to making the magnitude of effects larger).  
-
-ans:DO NOT HAVE SNPS AS CONFOUNDERS!!! SET TO NA!! 
-
-
-5) Should the orcale always be the highest powered?  For example, wouldnt 1df GxE model be more powerful than oracle in most situations? 
-
-6) Do we want to have power simulations for nonlinear ACE to showcase when 1df models are not powered?  Currently only showing nonlinear ACE cases for bias simulations (ie, we dont have the "U" shaped power simulations) 
-
-ans: NO WE DO NOT 
-
-7) for specifying the oracle model, we need to decide whether there are epistatic effects -- then we will need X1*(adj_SNP) terms that are possibly nonlinear 
-
-ans: NO EPISTATIC EFFECTS 
-
-Need to do: 
-1) include seeds for each sim -- future.seed -- check: ***
-2) specify whether epistatic effects of constant across all SNP X1 = 0, 1, 2 levels -- check: ***
-3) specify MOR levels -- check: 
-4) change all sim names -- check: ***
-5) once have MOR simulations configured, need to put ATE scenarios -- check: ***
-6) add a confounding effect for SNP X1 in all sims -- check: we removed SNPs as confounders 
-7) Change nfolds_cv_Q_init to 10 for all sims -- for overfitting -- check: ***
-8) CHECK ALL DISTRIBUTIONS OF PROPENSITY FOR ALL SIMULATIONS!!! Make sure it is unimodal and centered 
-9) include all the `family` arguments -- check: ***
-10) Change the oracle function to an appropriate orcale 
-11) change num_sims back to 1000 before running final sims 
-12) change nfolds_cv_Q_init back to 10 before running final sims 
-13) How do we want to present the plots?  Change the plots in the main function 
-14) colorblind friendly palette 
 
 # Bias Simulations 
 
@@ -404,253 +358,8 @@ apply(omitted_var_bias_MOR$bias_mean_data, MARGIN = 1,
 
 ```
 
-<!-- ## Continuous Outcome -- control for ATE -->
-
-<!-- ### ATE -- Linear Confounding  -->
-
-<!-- ```{r} -->
-<!-- # propensity model  -->
-<!-- confounder_data_propensity_formula = ~ age + sex + cohort + ancestry_1 +  ancestry_2 -->
-
-<!-- confounder_propensity_effects = c("age" = .02,  -->
-<!--                                   "sex" = -.15, -->
-<!--                                   "cohort2" = .1,  -->
-<!--                                   "cohort3" = -.12,  -->
-<!--                                   "cohort4" = .1,  -->
-<!--                                   "cohort5" = -.2,  -->
-<!--                                   "ancestry_1" = .15, -->
-<!--                                   "ancestry_2" = -.11) -->
-
-<!-- # outcome model  -->
-<!-- confounder_data_outcome_formula = ~ age + sex + cohort + ancestry_1 +  ancestry_2 -->
-
-<!-- confounder_outcome_effects = c("age" = .03,  -->
-<!--                                "sex" = 1.5, -->
-<!--                                "cohort2" = -2,  -->
-<!--                                "cohort3" = 3,  -->
-<!--                                "cohort4" = 2,  -->
-<!--                                "cohort5" = -1,  -->
-<!--                                "ancestry_1" = 1.2, -->
-<!--                                "ancestry_2" = -1.5) -->
-<!-- ################################################################################# -->
-<!-- family = "gaussian" -->
-<!-- SNP1_intercept_effs = c(-1.5,-1,-.5) # baseline effect of SNP 1 at each level 0,1,2 -->
-<!-- ACE_type = "ATE" # ACE type we choose to generate data -- we can control one or other   -->
-<!-- ACE = c(0.2,0.4,0.6) # underlying ACE effects  -->
-
-<!-- with_progress(bias_lin_conf_ATE <- tmle_comparison_1snp(num_sims = num_sims,  -->
-<!--                                           n_smp = n_smp,  -->
-<!--                                           n_snp = n_snp, -->
-<!--                                           family = family, -->
-<!--                                           snps_propensity =snps_propensity,  -->
-<!--                                           snp_propensity_effects = snp_propensity_effects, -->
-<!--                                           exposure_prev = exposure_prev,  -->
-<!--                                           SNP_MAF = SNP_MAF, -->
-<!--                                           SNP1_intercept_effs = SNP1_intercept_effs,  -->
-<!--                                           SNP_adj_effs_0 = SNP_adj_effs_0,  -->
-<!--                                           SNP_adj_effs_1 = SNP_adj_effs_1, -->
-<!--                                           SNP_adj_effs_2 = SNP_adj_effs_2, -->
-<!--                                           ACE_type = ACE_type, -->
-<!--                                           ACE = ACE, -->
-<!--                                           rho = rho,  -->
-<!--                                           W_exposure_null = W_exposure_null,  -->
-<!--                                           W_outcome_null = W_outcome_null,  -->
-<!--                                           TMLE_args_list = TMLE_args_list,  -->
-<!--                                           confounder_data_propensity_formula = confounder_data_propensity_formula,  -->
-<!--                                           confounder_propensity_effects = confounder_propensity_effects,  -->
-<!--                                           confounder_data_outcome_formula = confounder_data_outcome_formula,  -->
-<!--                                           confounder_outcome_effects = confounder_outcome_effects,  -->
-<!--                                           propensity_SL.library = propensity_SL.library,  -->
-<!--                                           future.seed = future.seed)) -->
-
-<!-- output_results(bias_lin_conf_ATE) -->
-
-<!-- bias_lin_conf_ATE$bias_mean_data -->
-
-<!-- apply(bias_lin_conf_ATE$bias_mean_data, MARGIN = 1, -->
-<!--       weighted.mean, w = 1 / c(dbinom(0,2,SNP_MAF[1]), dbinom(1,2,SNP_MAF[1]), dbinom(2,2,SNP_MAF[1]))) -->
-
-<!-- ``` -->
-
-<!-- ### ATE -- Misspecification Bias  -->
-
-<!-- ```{r} -->
-<!-- confounder_data_propensity_formula = ~ age + sex + cohort + ancestry_1 +  ancestry_2 -->
-
-<!-- confounder_propensity_effects = c("age" = .005, -->
-<!--                                   "sex" = .2, -->
-<!--                                   "cohort2" = .13, -->
-<!--                                   "cohort3" = -.2, -->
-<!--                                   "cohort4" = .1, -->
-<!--                                   "cohort5" = .3, -->
-<!--                                   "ancestry_1" = .25, -->
-<!--                                   "ancestry_2" = -.2 -->
-<!--                                   ) -->
-
-<!-- confounder_data_outcome_formula = ~ age + sex + cohort + ancestry_1 + ancestry_2 + I(sex*(X1 == 1)) + I(sex*(X1 == 2)) -->
-
-<!-- confounder_outcome_effects = c("age" = .02, -->
-<!--                                "sex" = .6, -->
-<!--                                "cohort2" = -1, -->
-<!--                                "cohort3" = 2, -->
-<!--                                "cohort4" = 1.5, -->
-<!--                                "cohort5" = -1.5, -->
-<!--                                "ancestry_1" = -1.2, -->
-<!--                                "ancestry_2" = 1.5, -->
-<!--                                "I(sex*(X1 == 1))" = -1.5, -->
-<!--                                "I(sex*(X1 == 2))" = 3.5 -->
-<!--                                ) -->
-
-
-
-<!-- family = "gaussian" -->
-<!-- SNP1_intercept_effs = c(-1.5,-1,-.5) -1.5   # baseline effect of SNP 1 at each level 0,1,2 -->
-<!-- ACE_type = "ATE" # ACE type we choose to generate data -- we can control one or other   -->
-<!-- ACE = c(.2,.4,.6)  # underlying ACE effects  -->
-<!-- snps_propensity = NA # which SNPs to include in the propensity model,  -->
-<!-- # set to NA for no SNPs in propensity -->
-<!-- snp_propensity_effects = c(.2,.2,.2,.2,-.2,-.2,-.2,-.2)   # logit effects for snps in propensity, -->
-
-
-<!-- # tmle oracle specific formulas -->
-<!-- propensity_formula = A ~ age + sex + cohort2 + cohort3 + cohort4 + cohort5 + ancestry_1 +  ancestry_2  -->
-
-<!-- outcome_formula = Y ~ A + X2 + X3 + X4 + X5 + X6 + X7 + X8 + X9 + X10 + age + sex + cohort2 + cohort3 + cohort4 + cohort5 + ancestry_1 +  ancestry_2  -->
-
-
-<!-- with_progress(misspecification_bias_ATE <- tmle_comparison_1snp(num_sims = num_sims,  -->
-<!--                                           n_smp = n_smp,  -->
-<!--                                           n_snp = n_snp, -->
-<!--                                           family = family,  -->
-<!--                                           snps_propensity =snps_propensity,  -->
-<!--                                           snp_propensity_effects = snp_propensity_effects, -->
-<!--                                           exposure_prev = exposure_prev,  -->
-<!--                                           SNP_MAF = SNP_MAF, -->
-<!--                                           SNP1_intercept_effs = SNP1_intercept_effs,  -->
-<!--                                           SNP_adj_effs_0 = SNP_adj_effs_0,  -->
-<!--                                           SNP_adj_effs_1 = SNP_adj_effs_1, -->
-<!--                                           SNP_adj_effs_2 = SNP_adj_effs_2, -->
-<!--                                           ACE_type = ACE_type, -->
-<!--                                           ACE = ACE, -->
-<!--                                           rho = rho,  -->
-<!--                                           W_exposure_null = W_exposure_null,  -->
-<!--                                           W_outcome_null = W_outcome_null,  -->
-<!--                                           TMLE_args_list = TMLE_args_list,  -->
-<!--                                           confounder_data_propensity_formula = confounder_data_propensity_formula,  -->
-<!--                                           confounder_propensity_effects = confounder_propensity_effects,  -->
-<!--                                           confounder_data_outcome_formula = confounder_data_outcome_formula,  -->
-<!--                                           confounder_outcome_effects = confounder_outcome_effects,  -->
-<!--                                           propensity_SL.library = propensity_SL.library,  -->
-<!--                                           propensity_formula = propensity_formula,  -->
-<!--                                           outcome_formula = outcome_formula,  -->
-<!--                                           future.seed = future.seed)) -->
-
-<!-- # NEED TO GET BARTMACHINE WORKING -->
-<!-- output_results(misspecification_bias_ATE) -->
-<!-- misspecification_bias_ATE$bias_mean_data -->
-
-<!-- # weighted mean -->
-
-<!-- apply(misspecification_bias_ATE$bias_mean_data, MARGIN = 1, -->
-<!--       weighted.mean, w = 1 / c(dbinom(0,2,SNP_MAF[1]), dbinom(1,2,SNP_MAF[1]), dbinom(2,2,SNP_MAF[1]))) -->
-
-<!-- ``` -->
-
-
-
-<!-- ### ATE -- Omitted Variable Bias  -->
-
-<!-- ```{r} -->
-<!-- # propensity model -->
-<!-- confounder_data_propensity_formula = ~ age + sex + cohort + ancestry_1 +  ancestry_2 -->
-
-<!-- confounder_propensity_effects = c("age" = .02, -->
-<!--                                "sex" = 1.5, -->
-<!--                                "cohort2" = -1, -->
-<!--                                "cohort3" = 2, -->
-<!--                                "cohort4" = 1.5, -->
-<!--                                "cohort5" = -1.5, -->
-<!--                                "ancestry_1" = -1.2, -->
-<!--                                "ancestry_2" = 1.5 -->
-<!--                                     ) -->
-
-
-
-<!-- # outcome model -->
-<!-- confounder_data_outcome_formula = ~ age + sex + cohort + ancestry_1 + ancestry_2  -->
-
-<!-- confounder_outcome_effects = c("age" = .05, -->
-<!--                                "sex" = 1.2, -->
-<!--                                "cohort2" = 1, -->
-<!--                                "cohort3" = -1, -->
-<!--                                "cohort4" = -2, -->
-<!--                                "cohort5" = 1.5, -->
-<!--                                "ancestry_1" = 1.25, -->
-<!--                                "ancestry_2" = -1 -->
-<!-- ) -->
-
-
-<!-- family = "binomial" -->
-<!-- SNP1_intercept_effs = c(-1.5,-1,-.5)   # baseline effect of SNP 1 at each level 0,1,2 -->
-<!-- ACE_type = "MOR" # ACE type we choose to generate data -- we can control one or other   -->
-<!-- ACE = c(1.0,1.2,1.45)  # underlying ACE effects  -->
-<!-- snps_propensity = 1:8 # which SNPs to include in the propensity model,  -->
-<!-- # set to NA for no SNPs in propensity -->
-<!-- snp_propensity_effects = c(.2,.2,.2,.2,-.2,-.2,-.2,-.2)   # logit effects for snps in propensity, -->
-
-<!-- # if snps_propensity is NA, does not get used -->
-
-<!-- # tmle oracle specific formulas -->
-<!-- propensity_formula = A ~ age + sex + cohort2 + cohort3 + cohort4 + cohort5 + ancestry_1 +  ancestry_2 -->
-<!-- outcome_formula = Y ~ A + X2 + X3 + X4 + X5 + X6 + X7 + X8 + X9 + X10 + age + sex + cohort2 + cohort3 + cohort4 + cohort5 + ancestry_1 +  ancestry_2  -->
-
-<!-- with_progress(omitted_var_bias_ATE <- tmle_comparison_1snp(num_sims = num_sims,  -->
-<!--                                           n_smp = n_smp,  -->
-<!--                                           n_snp = n_snp, -->
-<!--                                           family = family,  -->
-<!--                                           snps_propensity =snps_propensity,  -->
-<!--                                           snp_propensity_effects = snp_propensity_effects, -->
-<!--                                           exposure_prev = exposure_prev,  -->
-<!--                                           SNP_MAF = SNP_MAF, -->
-<!--                                           SNP1_intercept_effs = SNP1_intercept_effs,  -->
-<!--                                           SNP_adj_effs_0 = SNP_adj_effs_0,  -->
-<!--                                           SNP_adj_effs_1 = SNP_adj_effs_1, -->
-<!--                                           SNP_adj_effs_2 = SNP_adj_effs_2, -->
-<!--                                           ACE_type = ACE_type, -->
-<!--                                           ACE = ACE, -->
-<!--                                           rho = rho,  -->
-<!--                                           W_exposure_null = W_exposure_null,  -->
-<!--                                           W_outcome_null = W_outcome_null,  -->
-<!--                                           TMLE_args_list = TMLE_args_list,  -->
-<!--                                           confounder_data_propensity_formula = confounder_data_propensity_formula,  -->
-<!--                                           confounder_propensity_effects = confounder_propensity_effects,  -->
-<!--                                           confounder_data_outcome_formula = confounder_data_outcome_formula,  -->
-<!--                                           confounder_outcome_effects = confounder_outcome_effects,  -->
-<!--                                           propensity_SL.library = propensity_SL.library,  -->
-<!--                                           propensity_formula = propensity_formula,  -->
-<!--                                           outcome_formula = outcome_formula,  -->
-<!--                                           future.seed = future.seed)) -->
-
-<!-- # NEED TO GET BARTMACHINE WORKING -->
-<!-- output_results(omitted_var_bias_ATE) -->
-<!-- omitted_var_bias_ATE$bias_mean_data -->
-
-<!-- apply(omitted_var_bias_ATE$bias_mean_data, MARGIN = 1, -->
-<!--       weighted.mean, w = 1 / c(dbinom(0,2,SNP_MAF[1]), dbinom(1,2,SNP_MAF[1]), dbinom(2,2,SNP_MAF[1]))) -->
-
-<!-- ``` -->
-
-
 
 # Power Simulations 
-Need to do: 
-1) changed all names of sims  -- check: * 
-2) specify all confounding structures correct -- check:
-3) make sure seeds are there -- check:
-4) make sure SNP adjusting effects are specified -- check:
-5) check if any overlap of Bias simulations need to do checklist! 
-
-Note -- over here, do not care for showing bias, just want to look at power.  
 
 ## Binary Outcome -- control for MOR
 
@@ -735,7 +444,13 @@ for(i in 1: length(u1))
   cat(paste0("\nSim",i))
 }
 
-process_power_plots(power_lin_conf_mult_MOR, ACE = "MOR")
+
+MOR_levels_1 = ACEs
+
+
+process_power_plots_MOR(power_lin_conf_mult_MOR,MOR_levels_1, 
+                        log_ACE = F)
+
 
 ```
 
@@ -824,121 +539,16 @@ for(i in 1: length(u1))
   cat(paste0("\nSim",i))
 }
 
-process_power_plots(power_lin_conf_mult_MOR_conf, ACE = "MOR")
+# process_power_plots(power_lin_conf_mult_MOR_conf, ACE = "MOR")
+MOR_levels_2 = ACEs
+
+
+process_power_plots_MOR(power_lin_conf_mult_MOR_conf,MOR_levels_2, 
+                        log_ACE = F)
 
 ```
 
 
-<!-- # testing gxe TMLE  -->
-
-<!-- ```{r} -->
-<!-- # propensity model  -->
-<!-- confounder_data_propensity_formula = ~ age + sex + cohort + ancestry_1 +  ancestry_2 -->
-
-<!-- confounder_propensity_effects = c("age" = .02,  -->
-<!--                                   "sex" = -.2, -->
-<!--                                   "cohort2" = .1,  -->
-<!--                                   "cohort3" = -.1,  -->
-<!--                                   "cohort4" = -.2,  -->
-<!--                                   "cohort5" = -.2,  -->
-<!--                                   "ancestry_1" = .1, -->
-<!--                                   "ancestry_2" = -.1) -->
-
-<!-- # outcome model  -->
-<!-- confounder_data_outcome_formula = ~ age + sex + cohort + ancestry_1 +  ancestry_2 -->
-
-<!-- confounder_outcome_effects = c("age" = .015,  -->
-<!--                                "sex" = -.2, -->
-<!--                                "cohort2" = -.2,  -->
-<!--                                "cohort3" = .2,  -->
-<!--                                "cohort4" = -.1,  -->
-<!--                                "cohort5" = -.1,  -->
-<!--                                "ancestry_1" = .15, -->
-<!--                                "ancestry_2" = -.2) -->
-<!-- ################################################################################# -->
-
-<!-- family = "binomial" -->
-<!-- SNP1_intercept_effs = c(-1.5,-1,-.5) -1 # baseline effect of SNP 1 at each level 0,1,2 -->
-<!-- ACE_type = "MOR" # ACE type we choose to generate data -- we can control one or other   -->
-<!-- ACE = c(1.0,1.2,1.45) # underlying ACE effects  -->
-<!-- snps_propensity = NA # which SNPs to include in the propensity model,  -->
-<!-- # set to NA for no SNPs in propensity -->
-<!-- snp_propensity_effects = c(.1,.1,.1,.1,.1,.1,.1,.1)   # logit effects for snps in propensity,  -->
-<!-- # if snps_propensity is NA, does not get used -->
-
-
-<!--   A_prop_int_effects = gen_A_prop_int_effect(n = 1000000,  -->
-<!--                                              n_snp = n_snp, -->
-<!--                                              family= family, -->
-<!--                                              snps_propensity = snps_propensity,  -->
-<!--                                              snp_propensity_effects = snp_propensity_effects,  -->
-<!--                                              exposure_prev = exposure_prev,  -->
-<!--                                              SNP_MAF = SNP_MAF,  -->
-<!--                                              SNP1_intercept_effs = SNP1_intercept_effs,  -->
-<!--                                              SNP_adj_effs_0 =  SNP_adj_effs_0,  -->
-<!--                                              SNP_adj_effs_1 = SNP_adj_effs_1,  -->
-<!--                                              SNP_adj_effs_2  = SNP_adj_effs_2 ,  -->
-<!--                                              ACE_type = ACE_type,  -->
-<!--                                              ACE = ACE, -->
-<!--                                              rho = rho,  -->
-<!--                                              confounder_data_propensity_formula = confounder_data_propensity_formula,  -->
-<!--                                              confounder_propensity_effects = confounder_propensity_effects,  -->
-<!--                                              confounder_data_outcome_formula = confounder_data_outcome_formula,  -->
-<!--                                              confounder_outcome_effects = confounder_outcome_effects) -->
-
-<!-- data = gen_data_ACE(n = 10000,  -->
-<!--                     n_snp = n_snp,  -->
-<!--                     family = family,  -->
-<!--                     snps_propensity = snps_propensity,  -->
-<!--                     snp_propensity_effects = snp_propensity_effects,  -->
-<!--                     propensity_intercept = A_prop_int_effects$propensity_intercept, -->
-<!--                     SNP_MAF = SNP_MAF,  -->
-<!--                     SNP1_intercept_effs = SNP1_intercept_effs,  -->
-<!--                     SNP_adj_effs_0 =  SNP_adj_effs_0,  -->
-<!--                     SNP_adj_effs_1 = SNP_adj_effs_1,  -->
-<!--                     SNP_adj_effs_2  = SNP_adj_effs_2 ,  -->
-<!--                     ACE_type = ACE_type,  -->
-<!--                     A_effects =  A_prop_int_effects$A_effects, -->
-<!--                     rho = rho,  -->
-<!--                     confounder_data_propensity_formula = confounder_data_propensity_formula,  -->
-<!--                     confounder_propensity_effects = confounder_propensity_effects,  -->
-<!--                     confounder_data_outcome_formula = confounder_data_outcome_formula,  -->
-<!--                     confounder_outcome_effects = confounder_outcome_effects) -->
-
-<!-- data = model.matrix( ~ . , data)[,-1] %>% data.frame() -->
-
-
-<!-- tmle_gxe_outcome_SL = tmle_gxe(Y = data$Y,  -->
-<!--                                A = data$A,  -->
-<!--                                G = data[, 3:12],  -->
-<!--                                W = data[, -c(1:12)],  -->
-<!--                                family = "binomial",  -->
-<!--                                TMLE_args_list = list( -->
-<!--                                  outcome_method = "SL", -->
-<!--                                  npv_thresh = .015, -->
-<!--                                  near_positivity_method = "trim", -->
-<!--                                  nfolds_cv_Q_init = 10, -->
-<!--                                  nfolds_cv_glmnet_outcome = 3, -->
-<!--                                  alpha_outcome = .5, -->
-<!--                                  clever_cov_propensity_wt = T,  -->
-<!--                                  outcome_SL.library = c("SL.glmnet",  -->
-<!--                                                         "SL.rpart"),  -->
-<!--                                  outcome_SL.cvControl = list(V = 10L,  -->
-<!--                                                              stratifyCV = T,  -->
-<!--                                                              shuffle = TRUE,  -->
-<!--                                                              validRows = NULL)),  -->
-<!--                                propensity_SL.library = c("SL.glmnet",  -->
-<!--                                                          "SL.rpart"),  -->
-<!--                                propensity_SL.cvControl = list(V = 10L,  -->
-<!--                                                               stratifyCV = T,  -->
-<!--                                                               shuffle = TRUE,  -->
-<!--                                                               validRows = NULL), -->
-<!--                                include_G_propensity = T,  -->
-<!--                                include_W_outcome = T,  -->
-<!--                                SNP_results = c(1,3,5),  -->
-<!--                                progress = T,  -->
-<!--                                parallel = T) -->
-<!-- ``` -->
 
 
 
@@ -952,3 +562,7 @@ process_power_plots(power_lin_conf_mult_MOR_conf, ACE = "MOR")
 
 
 
+```{r}
+save.image("~/Desktop/USC/Targeted Learning/Simulations_Manuscript/tlgxe_simulations/Simulation_results_10-2-24")
+load("~/Desktop/USC/Targeted Learning/Simulations_Manuscript/tlgxe_simulations/Simulation_results_10-2-24")
+```

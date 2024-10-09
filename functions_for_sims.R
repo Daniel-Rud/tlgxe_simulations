@@ -19,6 +19,7 @@ library(dplyr) # for pivot longer
 library(tidyr)
 source("/Users/danielrud/Desktop/USC/Targeted Learning/tlgxe/tmle_gxe_function.R")
 library(ipw) # for inverse prob trt wts
+library(latex2exp)
 #####################################################
 
 
@@ -1156,7 +1157,9 @@ process_sim_results = function(sim_results)
               power_data = power))
 }
 
-process_power_plots = function(sim, ACE = "MOR")
+process_power_plots = function(sim, ACE = "MOR", log_ACE = FALSE, base = exp(1),
+                               rm_methods = c("tmle_oracle_ATE", "tmle_oracle_ATE_linear", 
+                               "tmle_oracle_MOR", "tmle_oracle_MOR_mult"))
 {
   power_data = sapply(sim, "[[", 1) %>% t
   
@@ -1170,7 +1173,14 @@ process_power_plots = function(sim, ACE = "MOR")
     rm_cols = 5:8
   }
   
+  rm_cols = c(rm_cols, which(colnames(power_data) %in% rm_methods))
+  
   power_data = power_data[, -rm_cols] 
+  
+  if(log_ACE == T)
+  {
+    power_data =  (power_data %>% log(base = base))
+  }
   
   
   power_data = cbind(sim_num = 1:nrow(power_data), power_data) 
@@ -1180,11 +1190,104 @@ process_power_plots = function(sim, ACE = "MOR")
                                                           names_to = "method", 
                                                           values_to = "power") %>% data.frame
   
+  
+  
+  # plotting
+  
+  
   power_plot = ggplot(data = power_data, mapping = aes(x = sim_num, y = power, color = method)) + 
     geom_point() + geom_line() + xlab("ACE sim level") + ylab("Power") +
     scale_x_continuous(breaks = unique(power_data$sim_num)) + 
-    scale_color_brewer(palette = "Set1") + geom_hline(yintercept = 0.05, color = "red", 
-                                                      linetype = "dashed")
+    scale_color_brewer(palette = "Set1") + 
+    geom_hline(yintercept = ifelse(log_ACE, log(0.05, base = base), 0.05), 
+                                   color = "red", linetype = "dashed")
+  
+  if(log_ACE == T)
+  {
+    power_plot = power_plot + ylab(paste0("Log_{", round(base, 2), "}(Power)"))
+  }
+  
+  return(power_plot)
+  
+}
+
+process_power_plots_MOR = function(sim, MOR_levels, log_ACE = FALSE, base = exp(1),
+                                   rm_methods = c("tmle_oracle_ATE", "tmle_oracle_ATE_linear", 
+                                                  "tmle_oracle_MOR", "tmle_oracle_MOR_mult", 
+                                                  "gcomp_oracle_mod"), 
+                                   ACE_levels)
+{
+  power_data = sapply(sim, "[[", 1) %>% t
+  
+  rm_cols = 1:4
+  
+  
+  rm_cols = c(rm_cols, which(colnames(power_data) %in% rm_methods))
+  
+  power_data = power_data[, -rm_cols] 
+  
+  if(log_ACE == T)
+  {
+    power_data =  (power_data %>% log(base = base))
+  }
+  
+  
+  power_data = cbind(sim_num = 1:nrow(power_data), power_data) 
+  
+  
+  power_data = power_data %>% data.frame %>% pivot_longer(cols =2:ncol(power_data), 
+                                                          names_to = "method", 
+                                                          values_to = "power") %>% data.frame
+  
+  power_data$method = factor(power_data$method, 
+                             levels = c("gxe_1df", "gxe_2df", "tmle_MOR_mult", "tmle_MOR"), 
+                             ordered = T)
+  
+  
+  # create names for MOR levels 
+  
+  sim_level_names = character(length = nrow(MOR_levels))
+  
+  for(i in 1: nrow(MOR_levels))
+  {
+    sim_level_names[i] = paste0("(", 
+                                paste0(MOR_levels[i,] %>% round(2), collapse = ", "), ")")
+  }
+  
+  
+  
+  # plotting
+  
+  cbbPalette <- c("#009E73", "#E69F00", "#56B4E9", "#CC79A7", "#999999",
+                  "#F0E442", "#0072B2", "#D55E00")
+  
+  
+  power_plot = ggplot(data = power_data, mapping = aes(x = sim_num, y = power, color = method, 
+                                                       linetype = method)) + 
+    geom_point(shape = 1, size = 2) + geom_line(linewidth  = .7) + 
+    xlab(TeX("MOR for A by SNP level $S_1 = (0,1,2)$")) + ylab("Power") +
+    scale_x_continuous(breaks = unique(power_data$sim_num), labels = sim_level_names) + 
+    geom_hline(yintercept = ifelse(log_ACE, log(0.05, base = base), 0.05), 
+               color = "indianred", linetype = "dashed") + 
+    scale_linetype_manual(labels = c("GxE 1 df", "GxE 2 df", "tlGxE 1 df", "tlGxE 2 df"), 
+                          values = c("dashed", "dashed", "solid", "solid")) + 
+    scale_colour_manual(labels = c("GxE 1 df", "GxE 2 df", "tlGxE 1 df", "tlGxE 2 df"), 
+                        values = cbbPalette) + 
+    guides(color = guide_legend(title = "Model:"), linetype = guide_legend(title = "Model:"))  + theme_classic()  + 
+    ggtitle("Power Curve for testing Effect Modification") + 
+    theme(axis.text.x = element_text(size = 10), 
+          axis.text.y = element_text(size = 10), 
+          plot.title = element_text(size = 16, hjust = 0.5), 
+          axis.title.y = element_text( vjust = 1, size = 12), 
+          axis.title.x = element_text(size = 12, vjust = -.5)) + 
+    scale_y_continuous(breaks = c(0.05, .2,.4, .6))
+    
+  
+  
+  if(log_ACE == T)
+  {
+    power_plot = power_plot + ylab(paste0("Log_{", round(base, 2), "}(Power)"))
+  }
   
   return(power_plot)
   
