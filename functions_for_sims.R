@@ -17,9 +17,9 @@ library(bartMachine)
 library(xgboost)
 library(dplyr) # for pivot longer
 library(tidyr)
-source("/Users/danielrud/Desktop/USC/Targeted Learning/tlgxe/tmle_gxe_function.R")
 library(ipw) # for inverse prob trt wts
 library(latex2exp)
+library(tlGxE)
 #####################################################
 
 
@@ -620,8 +620,6 @@ tmle_comparison_1snp = function(num_sims = 1000,
                                 ACE_type = c("ATE", "MOR"),
                                 ACE = c(.2,.2,.2),
                                 rho = -1, 
-                                W_exposure_null = F, 
-                                W_outcome_null = F, 
                                 TMLE_args_list = list(
                                   outcome_method = c("glmnet_int", "glmnet", "gesso", "logistf"), 
                                   npv_thresh = (5/sqrt(length(Y)))/log(length(Y)), 
@@ -640,9 +638,7 @@ tmle_comparison_1snp = function(num_sims = 1000,
                                 propensity_SL.library = c("SL.gam", 
                                                           "SL.glmnet", 
                                                           "SL.ranger", 
-                                                          "SL.xgboost"), 
-                                propensity_formula = NULL,
-                                outcome_formula = NULL, 
+                                                          "SL.xgboost"),
                                 future.seed = T)
 # if W_exposure_null / W_outcome_null is true, fit propoensity / outcome model with no 
 # confounders
@@ -663,16 +659,12 @@ tmle_comparison_1snp = function(num_sims = 1000,
               ACE_type = ACE_type,
               ACE = ACE,
               rho = rho, 
-              W_exposure_null = W_exposure_null, 
-              W_outcome_null = W_outcome_null, 
               TMLE_args_list = TMLE_args_list, 
               confounder_data_propensity_formula = confounder_data_propensity_formula, 
               confounder_propensity_effects = confounder_propensity_effects, 
               confounder_data_outcome_formula= confounder_data_outcome_formula, 
               confounder_outcome_effects = confounder_outcome_effects, 
               propensity_SL.library = propensity_SL.library, 
-              propensity_formula = propensity_formula,
-              outcome_formula = outcome_formula, 
               future.seed = future.seed)
   
   p = progressor(steps = num_sims)
@@ -734,15 +726,15 @@ tmle_comparison_1snp = function(num_sims = 1000,
     ############################################################################
     
     # tests for power 
-      # oracle model ################################################################
-        # Create the string for the new terms X1, X2, ..., Xn
-        new_terms <- paste0("X", 1:n_snp, collapse = " + ")
-        # Combine the existing formula, interaction term, and new terms into a complete formula string
-        formula_string <- paste("Y ~ A*X1 + ", new_terms, "+ .")
-        # Convert the string to a formula and update the existing formula
-        oracle_formula <- update(confounder_data_outcome_formula, as.formula(formula_string))
-        oracle_mod = glm(oracle_formula, data = data, family = family)
-        
+      # # oracle model ################################################################
+      #   # Create the string for the new terms X1, X2, ..., Xn
+      #   new_terms <- paste0("X", 1:n_snp, collapse = " + ")
+      #   # Combine the existing formula, interaction term, and new terms into a complete formula string
+      #   formula_string <- paste("Y ~ A*X1 + ", new_terms, "+ .")
+      #   # Convert the string to a formula and update the existing formula
+      #   oracle_formula <- update(confounder_data_outcome_formula, as.formula(formula_string))
+      #   oracle_mod = glm(oracle_formula, data = data, family = family)
+      #   
       # gxe 1df ################################################################
         glm_formula_std = formula(paste0("Y ~ A*X", j, "+  age +sex + cohort + ancestry_1 + ancestry_2"))
         standard_GxE_mod = glm(glm_formula_std, data = data, family = family,)
@@ -765,16 +757,13 @@ tmle_comparison_1snp = function(num_sims = 1000,
         tmle_data = model.matrix( ~ . , data)[,-1] %>% data.frame()
         
         # tmle with superlearner for propensity 
-        tmle_mod = tmle_gxe(Y = tmle_data$Y,
-                            A = tmle_data$A, 
+        tmle_mod = tlGxE(Y = tmle_data$Y,
+                            E = tmle_data$A, 
                             G = tmle_data[,3:12], 
                             W = tmle_data[, -c(1:2, 3:12)], 
                             family = family,
-                            case_control_design = F, 
-                            disease_prevalence = NULL,
-                            obs.weights = NULL, 
                             propensity_SL.library = propensity_SL.library, 
-                            propensity_SL.cvControl = list(V = 10L, 
+                            propensity_SL.cvControl = list(V = 5L, 
                                                            stratifyCV = T, 
                                                            shuffle = TRUE, 
                                                            validRows = NULL), 
@@ -783,101 +772,10 @@ tmle_comparison_1snp = function(num_sims = 1000,
                             TMLE_args_list = TMLE_args_list,
                             SNP_results = 1,
                             parallel = F,
-                            ncores = NULL, 
+                            ncores = 1, 
                             progress = F, 
-                            verbose = F)[,1, drop = F]
-        # tmle with correct specification for propensity and outcome 
-        
-        tmle_oracle_mod = tmle_gxe(Y = tmle_data$Y,
-                                   A = tmle_data$A, 
-                                   G = tmle_data[,3:12], 
-                                   W = tmle_data[, -c(1:2, 3:12)], 
-                                   family = family,
-                                   case_control_design = F, 
-                                   disease_prevalence = NULL,
-                                   obs.weights = NULL, 
-                                   propensity_SL.library = propensity_SL.library, 
-                                   propensity_SL.cvControl = list(V = 10L, 
-                                                                  stratifyCV = T, 
-                                                                  shuffle = TRUE, 
-                                                                  validRows = NULL), 
-                                   include_G_propensity = T,
-                                   include_W_outcome = T, 
-                                   propensity_formula = propensity_formula, 
-                                   outcome_formula = outcome_formula, 
-                                   TMLE_args_list = TMLE_args_list,
-                                   SNP_results = 1,
-                                   parallel = F,
-                                   ncores = NULL, 
-                                   progress = F, 
-                                   verbose = F)[,1, drop = F]
-        
-        if(is.na(tmle_oracle_mod["MOR_EM_mult_baseline_est",1]))
-        {
-          saveRDS(data, file = "~/Desktop/USC/Targeted Learning/Simulations_Manuscript/tlgxe_simulations/debug_data_9_20_24.RDS")
-        }
-        
-    
-    # bias tests 
-      # oracle -- gcomp with correct outcome formula 
-        # gcomp for 3 levels of X1 
-        
-        gcomp_oracle_ACEs = get_ACEs_gcomp(data0 = data, formula = oracle_formula, family = family, 
-                                           pred_ids = list(
-                                             which(data$X1 == 0), 
-                                             which(data$X1 == 1), 
-                                             which(data$X1 == 2)
-                                           ))
-        
-        oracle_ATE = gcomp_oracle_ACEs$ATE
-        oracle_MOR = gcomp_oracle_ACEs$MOR
-        
-      # gcomp -- compute ACE for SNP X1 = 0, 1, 2 w/o other SNPs, include confounders 
-        
-        # gcomp_ACEs = get_ACEs_gcomp(data0 = data[which(data$X1 == 0), ],
-        #                             data1 = data[which(data$X1 == 1), ], 
-        #                             data2 = data[which(data$X1 == 2), ],
-        #                               formula = glm_formula_std, family = family, 
-        #                                    pred_ids = NULL)
-        # 
-        # 
-        # gcomp_ATE = gcomp_ACEs$ATE
-        # 
-        # gcomp_MOR = gcomp_ACEs$MOR
-        
-      # iptw -- compute ACE for SNP X1 = 0, 1, 2 w/o other SNPs, include confounders 
-        
-        # E = matrix(nrow = 3, ncol = 2)
-        # 
-        # for(i in 1:3)
-        # {
-        #   ipw_weights_i = ipwpoint(exposure = A, 
-        #                            family = "binomial", link = "logit", 
-        #                            denominator = ~  age +sex + cohort + ancestry_1 + ancestry_2, 
-        #                            data = data[which(data$X1 == (i-1)), ])$ipw.weights
-        #   
-        #   
-        #   suppressWarnings(iptw_i <- glm(Y ~ A, data = data[which(data$X1 == (i - 1)), ], 
-        #                                  family = family, weights = ipw_weights_i))
-        #   E[i, ] = c((iptw_i$coefficients %>% sum), iptw_i$coefficients[1])
-        # }
-        # 
-        # if(family == "binomial")
-        # {
-        #   E = plogis(E)
-        # }
-        # 
-        # E01 = E[1,1]; E00 = E[1,2]
-        # E11 = E[2,1]; E10 = E[2,2]
-        # E21 = E[3,1]; E20 = E[3,2]
-        # 
-        # iptw_ATE = c(E01 - E00, E11 - E10, E21 - E20) %>% as.numeric
-        # 
-        # iptw_MOR = c( (E01 / (1-E01)) / (E00 / (1 - E00)), 
-        #                (E11 / (1 - E11)) / (E10 / (1-E10)), 
-        #                (E21 / (1- E21)) / (E20 / (1 - E20))
-        # )  %>% as.numeric
-        
+                            verbose = F)$tlGxE_scan_results[,1, drop = F]
+
         # gxe 1df ################################################################
         
         gxe_1df_MOR = NULL
@@ -915,45 +813,28 @@ tmle_comparison_1snp = function(num_sims = 1000,
                           glm_int$coefficients["A"] + glm_int$coefficients["A:factor(X1)2"]) 
         }
         
+        
+        
 
-    power = c(tmle_ATE = ifelse(tmle_mod["ATE_EM_pvalue",1] < 0.05, 1, 0) %>% as.numeric,
-              tmle_ATE_linear = ifelse(tmle_mod["ATE_EM_lin_pvalue",1] < 0.05, 1, 0)%>% as.numeric,
-              tmle_oracle_ATE = ifelse(tmle_oracle_mod["ATE_EM_pvalue",1] < 0.05, 1, 0) %>% as.numeric, 
-              tmle_oracle_ATE_linear = ifelse(tmle_oracle_mod["ATE_EM_lin_pvalue",1] < 0.05, 1, 0)%>% as.numeric,
-              tmle_MOR = ifelse(tmle_mod["MOR_EM_pvalue",1] < 0.05, 1, 0)%>% as.numeric,
-              tmle_MOR_mult = ifelse(tmle_mod["MOR_EM_mult_pvalue",1] < 0.05, 1, 0)%>% as.numeric,
-              tmle_oracle_MOR = ifelse(tmle_oracle_mod["MOR_EM_pvalue",1] < 0.05, 1, 0)%>% as.numeric,
-              tmle_oracle_MOR_mult = ifelse(tmle_oracle_mod["MOR_EM_mult_pvalue",1] < 0.05, 1, 0)%>% as.numeric,
-              gcomp_oracle_mod = ifelse(summary(oracle_mod)$coefficients["A:X1", 4] < 0.05, 1, 0)%>% as.numeric,
+    power = c(tmle_ATE = ifelse(tmle_mod["ATE_codominant_pvalue",1] < 0.05, 1, 0) %>% as.numeric,
+              tmle_ATE_linear = ifelse(tmle_mod["ATE_additive_pvalue",1] < 0.05, 1, 0)%>% as.numeric,
+              tmle_MOR = ifelse(tmle_mod["MOR_codominant_pvalue",1] < 0.05, 1, 0)%>% as.numeric,
+              tmle_MOR_mult = ifelse(tmle_mod["MOR_additive_pvalue",1] < 0.05, 1, 0)%>% as.numeric,
               gxe_1df = glm_1df_power%>% as.numeric,
               gxe_2df = ifelse(lr_test$`Pr(>Chisq)`[2] < 0.05, 1, 0)%>% as.numeric)
     
     ATE_res = rbind(TMLE = c(tmle_mod[1],tmle_mod[2], tmle_mod[3]), 
-                    TMLE_linear = c(tmle_mod["ATE_EM_lin_baseline_est",1],
-                                    tmle_mod["ATE_EM_lin_baseline_est",1] + tmle_mod["ATE_EM_lin_est",1] , 
-                                    tmle_mod["ATE_EM_lin_baseline_est",1] + 2*tmle_mod["ATE_EM_lin_est",1]),
-                    TMLE_oracle = c(tmle_oracle_mod[1],tmle_oracle_mod[2], tmle_oracle_mod[3]), 
-                    TMLE_oracle_linear = c(tmle_oracle_mod["ATE_EM_lin_baseline_est",1],
-                                           tmle_oracle_mod["ATE_EM_lin_baseline_est",1] + tmle_oracle_mod["ATE_EM_lin_est",1] , 
-                                           tmle_oracle_mod["ATE_EM_lin_baseline_est",1] + 2*tmle_oracle_mod["ATE_EM_lin_est",1]),
-                    gcomp_oracle_ATE = oracle_ATE,
-                    # gcomp_ATE = gcomp_ATE, 
-                    # iptw_ATE = iptw_ATE, 
+                    TMLE_linear = c(tmle_mod["ATE_additive_baseline_est",1],
+                                    tmle_mod["ATE_additive_baseline_est",1] + tmle_mod["ATE_additive_lin_est",1] , 
+                                    tmle_mod["ATE_additive_baseline_est",1] + 2*tmle_mod["ATE_additive_lin_est",1]),
                     gxe_1df_ATE = gxe_1df_ATE,  
                     gxe_2df_ATE = gxe_2df_ATE
                     )
     
     MOR_res = rbind(TMLE = c(tmle_mod[7],tmle_mod[8], tmle_mod[9]), 
-                    TMLE_oracle = c(tmle_oracle_mod[7],tmle_oracle_mod[8], tmle_oracle_mod[9]), 
-                    TMLE_mult = c(tmle_mod["MOR_EM_mult_baseline_est",1], 
-                                  tmle_mod["MOR_EM_mult_baseline_est",1] * tmle_mod["MOR_EM_mult_est",1], 
-                                  tmle_mod["MOR_EM_mult_baseline_est",1] * tmle_mod["MOR_EM_mult_est",1]^2), 
-                    TMLE_oracle_mult = c(tmle_oracle_mod["MOR_EM_mult_baseline_est",1], 
-                                         tmle_oracle_mod["MOR_EM_mult_baseline_est",1] * tmle_oracle_mod["MOR_EM_mult_est",1], 
-                                         tmle_oracle_mod["MOR_EM_mult_baseline_est",1] * tmle_oracle_mod["MOR_EM_mult_est",1]^2),
-                    gcomp_oracle_MOR = oracle_MOR,
-                    # gcomp_MOR = gcomp_MOR,
-                    # iptw_MOR = iptw_MOR, 
+                    TMLE_mult = c(tmle_mod["MOR_additive_baseline_est",1], 
+                                  tmle_mod["MOR_additive_baseline_est",1] * tmle_mod["MOR_additive_mult_est",1], 
+                                  tmle_mod["MOR_additive_baseline_est",1] * tmle_mod["MOR_additive_mult_est",1]^2), 
                     gxe_1df_MOR = gxe_1df_MOR, 
                     gxe_2df_MOR = gxe_2df_MOR
                     )
@@ -1010,25 +891,36 @@ tmle_comparison_1snp = function(num_sims = 1000,
     MOR_long_estimates = reshape(MOR_estimates, varying = 1:3, direction = "long", sep = "_",
                                  timevar = "EM_level")
     MOR_long_estimates$EM_level = MOR_long_estimates$EM_level %>% factor
-  
+    
+    MOR_long_estimates$method = factor(MOR_estimates$method, levels = c("gxe_2df_MOR", "TMLE", "gxe_1df_MOR", "TMLE_mult"), 
+                                  labels = c("GxE Codominant", "tlGxE Codominant","GxE Additive", "tlGxE Additive"))
     
     power_plot_data = data.frame(power = power, method = names(power), SNP = "X1")
     
     power_plot = ggplot(data = power_plot_data, mapping = aes(x = SNP, y = power, color = method)) + 
       geom_jitter(size = 2, width = .1) + geom_hline(yintercept = 0.05, color = "red", linetype = "dashed") + 
       geom_hline(yintercept = 0.04, color = "black", linetype = "dashed") + 
-      geom_hline(yintercept = 0.06, color = "black", linetype = "dashed")
+      geom_hline(yintercept = 0.06, color = "black", linetype = "dashed") 
     
     # ATE_plot = ggplot(data = ATE_long_estimates, mapping = aes(x = EM_level, y = ATE, fill = method)) + 
     #   geom_boxplot() + xlab("Effect Modification Level of SNP X1 = 0,1,2") + 
     #   ylab("Bias of ATE estimate") + geom_hline(yintercept = 0, color = "red", linetype = "dashed")
     
+    cbbPalette <- c("#009E73", "#E69F00", "#56B4E9", "#CC79A7", "#999999",
+                    "#F0E442", "#0072B2", "#D55E00")
     
     MOR_plot = ggplot(data = MOR_long_estimates, mapping = aes(x = EM_level, y = MOR, fill = method)) + 
-      geom_boxplot() + xlab("Effect Modification Level of SNP X1 = 0,1,2") + 
-      ylab("Bias of MOR estimate") + geom_hline(yintercept = 0, color = "red", linetype = "dashed")
+      geom_boxplot() + xlab("Effect Modification Level of SNP S1 = 0,1,2") + 
+      ylab("Bias of MOR estimate") + geom_hline(yintercept = 0, color = "red", linetype = "dashed") + 
+      scale_fill_manual(values = cbbPalette, name = "Model") + 
+      theme(legend.position = "bottom", 
+            axis.title = element_text(size = 16),   # Increase axis title size
+            axis.text = element_text(size = 12),    # Increase axis labels size
+            legend.title = element_text(size = 16), # Increase legend title size
+            legend.text = element_text(size = 14)   # Increase legend labels size
+            ) 
     
-    EM_P = ggarrange(power_plot, MOR_plot, ncol = 2)
+    EM_P = ggarrange(power_plot, MOR_plot, ncol = 2, common.legend = TRUE, legend="bottom")
     
     bias_mean_data = tapply(MOR_long_estimates$MOR, list(MOR_long_estimates$EM_level, 
                                                                  MOR_long_estimates$method), mean)%>% t %>% data.frame 
@@ -1060,7 +952,8 @@ tmle_comparison_1snp = function(num_sims = 1000,
                        abs_bias_mean_data = abs_bias_mean_data, 
                        sd_data = sd_data, 
                        rmse_data = rmse_data, 
-                       simulation_arugments = args)
+                       simulation_arugments = args, 
+                       MOR_plot = MOR_plot)
   }else
   {
     methods_ATE = EM[[1]]$ATE_res %>% rownames
@@ -1090,12 +983,14 @@ tmle_comparison_1snp = function(num_sims = 1000,
     bias_mean_data = tapply(ATE_long_estimates$ATE, list(ATE_long_estimates$EM_level, 
                                                          ATE_long_estimates$method), mean)%>% t %>% data.frame 
     abs_bias_mean_data = tapply(ATE_long_estimates$ATE %>% abs, list(ATE_long_estimates$EM_level, 
-                                                                 ATE_long_estimates$method), mean)%>% t %>% data.frame 
-    sd_data = tapply(ATE_long_estimates$ATE, list(ATE_long_estimates$EM_level, 
-                                                           ATE_long_estimates$method), sd)%>% t %>% data.frame 
+                                                                 ATE_long_estimates$method), mean)%>% t %>% data.frame
     
+    # Note: Var(theta_hat - theta) = Var(theta_hat)!
+    sd_data = tapply(ATE_long_estimates$ATE, list(ATE_long_estimates$EM_level, 
+                                                           ATE_long_estimates$method), sd )%>% t %>% data.frame 
+    # Note: need to rerun if looking at RMSE
     rmse_data = tapply((ATE_long_estimates$ATE)^2, list(ATE_long_estimates$EM_level, 
-                                                       ATE_long_estimates$method), sd)%>% t %>% data.frame 
+                                                       ATE_long_estimates$method), mean)%>% sqrt %>% t %>% data.frame 
     
     
     EM_P = ggarrange(power_plot, ATE_plot, ncol = 2)
@@ -1167,10 +1062,10 @@ process_power_plots = function(sim, ACE = "MOR", log_ACE = FALSE, base = exp(1),
   
   if(ACE == "MOR")
   {
-    rm_cols = 1:4
+    rm_cols = 1:2
   }else
   {
-    rm_cols = 5:8
+    rm_cols = 3:4
   }
   
   rm_cols = c(rm_cols, which(colnames(power_data) %in% rm_methods))
@@ -1219,9 +1114,8 @@ process_power_plots_MOR = function(sim, MOR_levels, log_ACE = FALSE, base = exp(
 {
   power_data = sapply(sim, "[[", 1) %>% t
   
-  rm_cols = 1:4
-  
-  
+  rm_cols = 1:2
+
   rm_cols = c(rm_cols, which(colnames(power_data) %in% rm_methods))
   
   power_data = power_data[, -rm_cols] 
@@ -1240,7 +1134,7 @@ process_power_plots_MOR = function(sim, MOR_levels, log_ACE = FALSE, base = exp(
                                                           values_to = "power") %>% data.frame
   
   power_data$method = factor(power_data$method, 
-                             levels = c("gxe_1df", "gxe_2df", "tmle_MOR_mult", "tmle_MOR"), 
+                             levels = c("gxe_1df", "gxe_2df", "tmle_MOR_mult", "tmle_MOR"),
                              ordered = T)
   
   
@@ -1262,26 +1156,36 @@ process_power_plots_MOR = function(sim, MOR_levels, log_ACE = FALSE, base = exp(
                   "#F0E442", "#0072B2", "#D55E00")
   
   
+  methods_labels = c("GxE Additive", "GxE Codominant", "tlGxE Additive", "tlGxE Codominant")
   power_plot = ggplot(data = power_data, mapping = aes(x = sim_num, y = power, color = method, 
                                                        linetype = method)) + 
     geom_point(shape = 1, size = 2) + geom_line(linewidth  = .7) + 
-    xlab(TeX("MOR for A by SNP level $S_1 = (0,1,2)$")) + ylab("Power") +
+    xlab(TeX("MOR for E by SNP level $S_1 = (0,1,2)$")) + ylab("Power") +
     scale_x_continuous(breaks = unique(power_data$sim_num), labels = sim_level_names) + 
     geom_hline(yintercept = ifelse(log_ACE, log(0.05, base = base), 0.05), 
                color = "indianred", linetype = "dashed") + 
-    scale_linetype_manual(labels = c("GxE 1 df", "GxE 2 df", "tlGxE 1 df", "tlGxE 2 df"), 
+    
+    scale_linetype_manual(labels = methods_labels, 
                           values = c("dashed", "dashed", "solid", "solid")) + 
-    scale_colour_manual(labels = c("GxE 1 df", "GxE 2 df", "tlGxE 1 df", "tlGxE 2 df"), 
+    scale_colour_manual(labels = methods_labels, 
                         values = cbbPalette) + 
     guides(color = guide_legend(title = "Model:"), linetype = guide_legend(title = "Model:"))  + theme_classic()  + 
-    ggtitle("Power Curve for testing Effect Modification") + 
     theme(axis.text.x = element_text(size = 10), 
           axis.text.y = element_text(size = 10), 
           plot.title = element_text(size = 16, hjust = 0.5), 
           axis.title.y = element_text( vjust = 1, size = 12), 
           axis.title.x = element_text(size = 12, vjust = -.5)) + 
-    scale_y_continuous(breaks = c(0.05, .2,.4, .6))
-    
+    scale_y_continuous(breaks = c(0.05, .2,.4, .6)) + 
+    theme(
+      legend.position = "bottom",  # Move legend below the plot
+      legend.text = element_text(size = 14),  # Increase legend text size
+      legend.title = element_text(size = 16), # Increase legend title size
+      legend.key.size = unit(1.5, "cm"),       # Increase legend key size
+      axis.text.x = element_text(size = 14),  # Increase x-axis text size
+      axis.text.y = element_text(size = 14),  # Increase y-axis text size
+      axis.title.x = element_text(size = 16, vjust = -1.5),  # Adjust space above x-axis title
+      axis.title.y = element_text(size = 16, vjust = 1.5)    # Adjust space to the right of y-axis title
+    )
   
   
   if(log_ACE == T)
@@ -1290,6 +1194,74 @@ process_power_plots_MOR = function(sim, MOR_levels, log_ACE = FALSE, base = exp(
   }
   
   return(power_plot)
+  
+}
+
+generate_latex_table = function(sim)
+{
+  
+  
+  MAF = sim$simulation_arugments$SNP_MAF[1]
+  bias_data = sim$bias_mean_data[1:4, ]
+  sd_data = sim$sd_data[1:4, ]
+  rmse_data = sim$rmse_data[1:4, ]
+  
+  # inverse MAF weighted bias 
+  iw_bias = apply(bias_data, MARGIN = 1, 
+        weighted.mean, w = 1 / c(dbinom(0,2,MAF), dbinom(1,2,MAF), dbinom(2,2,MAF)))%>% 
+    round(3) %>% format(nsmall = 3)
+  
+  # bias weighted by MAF -- recovers mean bias 
+  mean_bias = apply(bias_data, MARGIN = 1, 
+                    weighted.mean, w = c(dbinom(0,2,MAF), dbinom(1,2,MAF), dbinom(2,2,MAF)))%>% 
+    round(3) %>% format(nsmall = 3)
+  
+  # inverse MAF weighted rmse 
+  iw_rmse = apply(rmse_data, MARGIN = 1, 
+                  weighted.mean, w = 1 / c(dbinom(0,2,MAF), dbinom(1,2,MAF), dbinom(2,2,MAF)))%>% 
+    round(3) %>% format(nsmall = 3)
+  
+  # rmse weighted by MAF -- recovers mean bias 
+  mean_rmse = apply(rmse_data, MARGIN = 1, 
+                    weighted.mean, w = c(dbinom(0,2,MAF), dbinom(1,2,MAF), dbinom(2,2,MAF))) %>% 
+    round(3) %>% format(nsmall = 3)
+  
+  # reformat data -- rounded
+  bias_data = bias_data %>% round(3) %>% format(nsmall = 3)
+  sd_data = sd_data %>% round(3) %>% format(nsmall = 3)
+  
+  # methods compared 
+  methods = c("GxE Codominant", "tlGxE Codominant", "GxE Additive", "tlGxE Additive")
+  
+  
+  table_string = ""
+  
+  for(i in c(3,4,1,2))
+  {
+    if(i %% 2 == 0)
+    {
+      table_string = paste0(table_string, "\rowcolor{gray!50}")
+    }
+    
+    table_string = paste0(table_string, "\textbf{",methods[i], "} & ")
+    for(j in 1:ncol(bias_data))
+    {
+        table_string = paste0(table_string, bias_data[i,j], " (",sd_data[i,j], ")",
+                             ifelse(j == ncol(bias_data),  " ", " & ")) 
+      
+    }
+    
+    # table_string = paste(table_string, "&", mean_bias[i], "&", iw_bias[i], "&", mean_rmse[i], 
+    #                      "&", iw_rmse[i], "\\ ")
+    table_string = paste(table_string, " \\ ")
+    if(i == 4)
+    {
+      table_string = paste0(table_string, "\\cline{1-4}")
+    }
+    
+  }
+  
+  return(table_string)
   
 }
 
