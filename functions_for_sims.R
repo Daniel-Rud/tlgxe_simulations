@@ -718,7 +718,7 @@ tmle_comparison_1snp = function(num_sims = 1000,
     
     ############################################################################
     # Diagnostic plots for simulated data ######################################
-    table(data$Y)
+    prop.table(table(data$Y) )
     plot(density(predict(glm(A ~ . - Y, data = data, family = "binomial"),
                          type = "response")))
     summary(predict(glm(A ~ . - Y, data = data, family = "binomial"),
@@ -1145,7 +1145,7 @@ process_power_plots_MOR = function(sim, MOR_levels, log_ACE = FALSE, base = exp(
   for(i in 1: nrow(MOR_levels))
   {
     sim_level_names[i] = paste0("(", 
-                                paste0(MOR_levels[i,] %>% round(2), collapse = ", "), ")")
+                                paste0(MOR_levels[i,] %>% round(2), collapse = ","), ")")
   }
   
   
@@ -1170,21 +1170,16 @@ process_power_plots_MOR = function(sim, MOR_levels, log_ACE = FALSE, base = exp(
     scale_colour_manual(labels = methods_labels, 
                         values = cbbPalette) + 
     guides(color = guide_legend(title = "Model:"), linetype = guide_legend(title = "Model:"))  + theme_classic()  + 
-    theme(axis.text.x = element_text(size = 10), 
-          axis.text.y = element_text(size = 10), 
-          plot.title = element_text(size = 16, hjust = 0.5), 
-          axis.title.y = element_text( vjust = 1, size = 12), 
-          axis.title.x = element_text(size = 12, vjust = -.5)) + 
-    scale_y_continuous(breaks = c(0.05, .2,.4, .6)) + 
+    scale_y_continuous(breaks = c(0.05, .2,.4, .6, .8)) + 
     theme(
       legend.position = "bottom",  # Move legend below the plot
       legend.text = element_text(size = 14),  # Increase legend text size
       legend.title = element_text(size = 16), # Increase legend title size
       legend.key.size = unit(1.5, "cm"),       # Increase legend key size
-      axis.text.x = element_text(size = 14),  # Increase x-axis text size
+      axis.text.x = element_text(size = 14, angle = 35, hjust = 1),  # Increase x-axis text size
       axis.text.y = element_text(size = 14),  # Increase y-axis text size
       axis.title.x = element_text(size = 16, vjust = -1.5),  # Adjust space above x-axis title
-      axis.title.y = element_text(size = 16, vjust = 1.5)    # Adjust space to the right of y-axis title
+      axis.title.y = element_text(size = 16, vjust = 1.5)    # Adjust space to the right of y-axis title, 
     )
   
   
