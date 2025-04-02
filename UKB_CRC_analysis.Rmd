@@ -1,0 +1,1025 @@
+---
+title: "UKB Data Analysis"
+author: "Daniel Rud"
+date: "2024-10-30"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Libraries 
+
+```{r}
+if (!requireNamespace("tlGxE", quietly = TRUE)) devtools::install_github("Daniel-Rud/tlGxE")
+library(tlGxE)
+library(magrittr)
+```
+
+# Process Data 
+Pull files 
+
+```{r}
+# original dataset with epi data and 3k SNPs
+snp_epi <- readRDS("~/Desktop/USC/Targeted Learning/Simulations_Manuscript/UKB_analysis/OneDrive_1_10-30-2024/snp_epi.rds")
+SNP_data = readRDS("~/Desktop/USC/Targeted Learning/Simulations_Manuscript/UKB_analysis/OneDrive_1_10-30-2024/dosage_8k.rds")
+# change colnames of SNP_data 
+
+```
+
+
+## subset data to UKB data 
+
+```{r}
+snp_epi = snp_epi[snp_epi$study == "UKB", ]
+SNP_data = SNP_data[SNP_data$study == "UKB", ]
+```
+
+
+# merge SNP data with epi data 
+
+```{r}
+sum(snp_epi$vcfid != SNP_data$vcfid)
+# 0 -- ids match 
+
+UKB_CRC_data = cbind(snp_epi[, 1:19], SNP_data[, -c(1:2)])
+
+# uncomment if want to save ---
+#saveRDS(UKB_CRC_data, "~/Desktop/USC/Targeted Learning/Simulations_Manuscript/UKB_analysis/OneDrive_1_10-30-2024/UKB_CRC_dataset.rds")
+```
+
+
+```{r}
+UKB_CRC_data = readRDS("~/Desktop/USC/Targeted Learning/Simulations_Manuscript/UKB_analysis/OneDrive_1_10-30-2024/UKB_CRC_dataset.rds")
+```
+
+
+Separate into Epi data and SNP data (from UKB dataset)
+
+```{r}
+epi_data = UKB_CRC_data[1:19]
+SNP_data = UKB_CRC_data[-c(1:19)]
+```
+
+
+# Begin Data Analysis 
+# look at the exposure distirbutions -- check for missingness 
+
+```{r}
+apply(epi_data[, c("outc", "age_ref_imp", "study", "asp_ref", 
+                   "smk_ever", "alcmod", "alcheavy", "male")], MARGIN = 2, FUN = table, useNA = "always")
+```
+
+
+SNP == 2 isnt always the most rare group
+
+make a params file with the SNP numbers for each sim 
+
+```{r}
+SNP_range = (1:ncol(SNP_data)) %>% matrix(ncol = 1)
+
+write.table(SNP_range, file = "/Users/danielrud/Desktop/USC/Targeted Learning/Simulations_Manuscript/UKB_analysis/OneDrive_1_10-30-2024/param_file.txt", 
+            row.names = F, col.names = F)
+
+```
+
+make 4 params files
+```{r}
+SNP_range = (1:ncol(SNP_data)) %>% matrix(ncol = 1)
+for (i in 1:4)
+{
+  start_idx = 2000*(i-1)+1
+  end_idx = 2000*(i)
+  if(i == 4)
+  {
+    end_idx = length(SNP_range)
+  }
+ write.table(SNP_range[start_idx:end_idx, ,drop = F], file = paste0("/Users/danielrud/Desktop/USC/Targeted Learning/Simulations_Manuscript/UKB_analysis/OneDrive_1_10-30-2024/param_file_",i,".txt"), 
+            row.names = F, col.names = F) 
+}
+
+```
+
+
+Create the smoking dataset 
+
+```{r}
+UKB_CRC_smk = cbind(epi_data[c(1:7, 9, 16,19)], SNP_data) %>% na.omit
+dim(UKB_CRC_smk)
+saveRDS(UKB_CRC_smk, "~/Desktop/USC/Targeted Learning/Simulations_Manuscript/UKB_analysis/OneDrive_1_10-30-2024/UKB_CRC_smk.rds")
+```
+
+## Table for confounder distribution
+
+```{r}
+library(Hmisc)
+library(table1)
+ukb_table_1 = readRDS("~/Desktop/USC/Targeted Learning/Simulations_Manuscript/UKB_analysis/OneDrive_1_10-30-2024/UKB_CRC_smk.rds")
+ukb_table_1$outc = factor(ukb_table_1$outc, levels = c(0, 1), labels = c("Control", "Case"))
+ukb_table_1$male = factor(ukb_table_1$male, levels = c(0, 1), labels = c("Female", "Male"))
+pvalue <- function(x, ...) {
+    # Construct vectors of data y, and groups (strata) g
+    y <- unlist(x)
+    g <- factor(rep(1:length(x), times=sapply(x, length)))
+    if (is.numeric(y)) {
+        # For numeric variables, perform a standard 2-sample t-test
+        p <- t.test(y ~ g)$p.value
+    } else {
+        # For categorical variables, perform a chi-squared test of independence
+        p <- chisq.test(table(y, g))$p.value
+    }
+    # Format the p-value, using an HTML entity for the less-than sign.
+    # The initial empty string places the output on the line below the variable label.
+    c("", sub("<", "&lt;", format.pval(p, digits=3, eps=0.001)))
+}
+
+
+
+label(ukb_table_1$male) <- "Male"
+label(ukb_table_1$smk_ever) <- "Ever Smoker"
+label(ukb_table_1$age_ref_imp) <- "Age at reference imputation (years)"
+label(ukb_table_1$bmi10) <- "BMI (kg/m²)"
+label(ukb_table_1$outc) <- "CRC Status"
+
+my.render.cont <- function(x) {
+    with(stats.apply.rounding(stats.default(x), digits=3), c("",
+        "Mean (SD)"=sprintf("%s (&plusmn; %s)", MEAN, SD)))
+}
+
+table1(~ male + smk_ever + age_ref_imp + bmi10 | outc, 
+       data = ukb_table_1, extra.col=list(`P-value`=pvalue), overall = F, 
+       render.continuous=my.render.cont)
+
+
+```
+
+## Filter for SNPs -- apply after analysis 
+
+```{r}
+#UKB_CRC_smk = readRDS("~/Desktop/USC/Targeted Learning/Simulations_Manuscript/UKB_analysis/OneDrive_1_10-30-2024/UKB_CRC_smk.rds")
+epi_data = UKB_CRC_smk[1:10]
+SNP_data = UKB_CRC_smk[, -c(1:10)]
+# do not exclude SNPs that have only levels 0 1 
+# change cell count to 10 
+# run SNPs as confounders with dosage adjustment (continuous)
+rm_snps = apply(SNP_data, MARGIN = 2, FUN = function(x)
+{
+  tab = table(epi_data$smk_ever, epi_data$outc, round(x))
+  
+  # this is to safeguard against SNPs that do not have level 2 
+  if(dim(tab)[3] < 3)
+  {
+    return(TRUE)
+  }else
+  {
+  for(i in 1:dim(tab)[3])
+  {
+    if(sum(tab[,,i] < 20) > 0)
+    {
+      return(TRUE)
+    }
+  }
+  return(FALSE)
+  }
+    
+  }) %>% which
+length(rm_snps)
+```
+
+
+## Global propensity scores for smoking 
+
+We compute the global propensity scores independently so that they do not have to be independently estimated on each iteration, since run on different computing units.  
+```{r}
+UKB_CRC_smk = readRDS("~/Desktop/USC/Targeted Learning/Simulations_Manuscript/UKB_analysis/OneDrive_1_10-30-2024/UKB_CRC_smk.rds")
+
+exposure = "smk_ever"
+confounders = c("age_ref_imp", "pc1", "pc2","pc3", "bmi10", "male")
+
+# find obs.weights 
+outcome_table = table(UKB_CRC_smk$outc)
+J = outcome_table[1] / outcome_table[2]
+disease_prevalence = 2523 / (2523 + 481588)
+
+# weight will be q0 for Y = 1 (cases) and (1-q0)*(1/J) for Y = 0 (controls)
+# where q0 is the disease prevalence
+obs.weights = UKB_CRC_smk$outc*disease_prevalence  + (1-UKB_CRC_smk$outc)*(1 - disease_prevalence)*(1/J)
+
+
+smk_propensity_scores <- generate_propensity_SL(exposure_data = UKB_CRC_smk[c(exposure, confounders)], 
+                                            obs.weights = obs.weights, 
+                                            SL.library = c("SL.glmnet", "SL.rpart", "SL.bartMachine"), 
+                                            SL.cvControl = list(V = 10L, stratifyCV = T, shuffle = TRUE, 
+                                                                validRows = NULL), 
+                                            parallel = T, 
+                                            ncores = 10) %>% as.numeric
+
+#saveRDS(smk_propensity_scores, file = "~/Desktop/USC/Targeted Learning/Simulations_Manuscript/UKB_analysis/OneDrive_1_10-30-2024/smk_propensities.rds")
+
+```
+
+## tlGxE run on cluster -- output results here.  
+
+```{r}
+dir_path = "/Users/danielrud/Desktop/USC/Targeted Learning/Simulations_Manuscript/UKB_analysis/OneDrive_1_10-30-2024/UKB_CRC_smk_results_glmnet_no_hier_1-28-25"
+files = list.files(dir_path)
+```
+
+## Process all SNPs
+
+```{r}
+SNP_files = list.files(dir_path)
+result_list = list()
+
+SNP_names = gsub(".RDS", "", gsub("SNP_", "", SNP_files))
+
+for(i in 1:length(SNP_files))
+{
+  result_list[[i]] = readRDS(paste0(dir_path, "/",SNP_files[i]))
+}
+
+result_list = do.call(cbind, result_list)
+colnames(result_list) = SNP_names
+
+# Filter from cross tabulation criteria earlier 
+result_list = result_list[, !(SNP_names %in% names(rm_snps))]
+
+# Filter from NAs
+if(length(which(colSums(is.na(result_list)) > 0)) > 0)
+{
+ result_list = result_list[, -which(colSums(is.na(result_list)) > 0)] 
+}
+
+
+level = 5*10^-4
+
+list(
+  ATE_aov = result_list[, which(result_list["ATE_EM_pvalue", ] < level), drop = F] %>% round(8), 
+  ATE_1df = result_list[, which(result_list["ATE_EM_lin_pvalue", ] <level), drop = F] %>% round(8), 
+  MOR_aov = result_list[, which(result_list["MOR_EM_pvalue", ] < level), drop = F] %>% round(8), 
+  MOR_1df = result_list[, which(result_list["MOR_EM_mult_pvalue", ] <level), drop = F] %>% round(8)
+)
+```
+
+## Make Latex table of results -- corresponds to Table 1 (upper)
+```{r}
+
+results_for_table = result_list[, which(result_list["ATE_EM_pvalue", ] < level |
+                                          result_list["ATE_EM_lin_pvalue", ] <level |
+                                          result_list["MOR_EM_pvalue", ] < level | 
+                                          result_list["MOR_EM_mult_pvalue", ] <level
+                                          ), drop = F] %>% t
+# add the SNP the RERI found 
+results_for_table = rbind(results_for_table, "X14.54415291" = result_list[, "X14.54415291"])
+# reorder for printing
+results_for_table = results_for_table[order(rownames(results_for_table)), ]
+
+snp_bp_chr = rownames(results_for_table)
+results_for_table = results_for_table[, - which(colnames(results_for_table) %in% c("var_ATE_E0", "var_ATE_E1",
+                                                                                   "var_ATE_E2", "var_MOR_E0", 
+                                                                                   "var_MOR_E1","var_MOR_E2", 
+                                                                                   "ATE_EM_F_statistic",
+                                                                                   "MOR_EM_F_statistic", 
+                                                                                   "ATE_EM_lin_baseline_est", 
+                                                                                   "ATE_EM_lin_est", 
+                                                                                   "MOR_EM_mult_baseline_est", 
+                                                                                   "MOR_EM_mult_est"))] %>% data.frame()
+
+rs_ids = c("rs4360494", "rs61776719", "rs1003563", "rs11157993", "rs11623717","rs12898159", "rs2379128")
+rownames(results_for_table) = rs_ids
+colnames(results_for_table) = c("ATE$_{00}$", "ATE$_{01}$", "ATE$_{11}$",
+                                "MOR$_{00}$", "MOR$_{01}$", "MOR$_{11}$", 
+                                "ATE Codominant p", "MOR codominant p", 
+                                "ATE additive p", "MOR additive p")
+
+results_for_table = results_for_table %>% round(4)
+chr = as.integer(sub("\\..*", "", gsub("X", "", snp_bp_chr)))
+bp = as.integer(sub(".*\\.", "",  gsub("X", "", snp_bp_chr))) 
+
+results_for_table = cbind(rs_ids,chr, bp, results_for_table)
+
+latex_table = ""
+p_thresh = 5*10^-4
+for(i in 1:nrow(results_for_table))
+{
+  latex_table = paste(latex_table, "& & & ", paste(results_for_table[i, c(4:6)] %>% round(4), collapse = " & " ))
+  for(j in c(10,12))
+  {
+    if(as.numeric(results_for_table[i, j]) <= p_thresh)
+    {
+      latex_table = paste(latex_table, "& \\textbf{", results_for_table[i, j] %>% round(4), "}") 
+      
+    }else
+    {
+      latex_table = paste(latex_table, "&" , results_for_table[i, j] %>% round(4)) 
+    }
+  }
+  
+  latex_table = paste(latex_table, "\\\\ \\textbf{",results_for_table[i,1], "}")
+  latex_table = paste(latex_table, "&", paste(results_for_table[i, c(2, 3, 7:9)] %>% round(2), collapse = " & "))
+   for(j in c(11,13))
+  {
+    if(as.numeric(results_for_table[i, j]) <= p_thresh)
+    {
+      latex_table = paste(latex_table, "& \\textbf{", results_for_table[i, j] %>% round(4), "}") 
+      
+    }else
+    {
+      latex_table = paste(latex_table, "&" , results_for_table[i, j] %>% round(4)) 
+    }
+  }
+  latex_table = paste(latex_table, " \\\\ \\hline")
+}
+
+# can use this if want to change sci not
+convert_scientific_to_latex <- function(text) {
+  gsub("([0-9]+)e([-+]?)0*([1-9]\\d*)", "$\\1 \\\\times 10^{\\2\\3}$", text, perl = TRUE)
+}
+
+cat(latex_table)
+```
+
+
+
+## Function to perform manhattan plotting 
+
+```{r}
+library(qqman)
+library(calibrate) # for textxy in self built manhattan function
+library(latex2exp)
+
+manhattan  = function (x, chr = "CHR", bp = "BP", p = "P", snp = "SNP", col = c("gray10", 
+    "gray60"), chrlabs = NULL, suggestiveline = -log10(0.00001), 
+    genomewideline = -log10(0.00000005), highlight = NULL, logp = TRUE, 
+    annotatePval = NULL, annotateTop = TRUE,txt_size = 1, ...) 
+{
+  CHR = BP = P = index = NULL
+  if (!(chr %in% names(x))) 
+    stop(paste("Column", chr, "not found!"))
+  if (!(bp %in% names(x))) 
+    stop(paste("Column", bp, "not found!"))
+  if (!(p %in% names(x))) 
+    stop(paste("Column", p, "not found!"))
+  if (!(snp %in% names(x))) 
+    warning(paste("No SNP column found. OK unless you're trying to highlight."))
+  if (!is.numeric(x[[chr]])) 
+    stop(paste(chr, "column should be numeric. Do you have 'X', 'Y', 'MT', etc? If so change to numbers and try again."))
+  if (!is.numeric(x[[bp]])) 
+    stop(paste(bp, "column should be numeric."))
+  if (!is.numeric(x[[p]])) 
+    stop(paste(p, "column should be numeric."))
+  if (!is.null(x[[snp]])) 
+    d = data.frame(CHR = x[[chr]], BP = x[[bp]], P = x[[p]], 
+                   pos = NA, index = NA, SNP = x[[snp]], stringsAsFactors = FALSE)
+  else 
+    d = data.frame(CHR = x[[chr]], BP = x[[bp]], P = x[[p]], 
+                      pos = NA, index = NA)
+  d <- d[order(d$CHR, d$BP), ]
+  if (logp) {
+    d$logp <- -log10(d$P)
+  }
+  else {
+    d$logp <- d$P
+  }
+  d$index = rep.int(seq_along(unique(d$CHR)), times = tapply(d$SNP, 
+                                                             d$CHR, length))
+  nchr = length(unique(d$CHR))
+  if (nchr == 1) {
+    d$pos = d$BP
+    xlabel = paste("Chromosome", unique(d$CHR), "position")
+  }
+  else {
+    lastbase = 0
+    ticks = NULL
+    for (i in unique(d$index)) {
+      if (i == 1) {
+        d[d$index == i, ]$pos = d[d$index == i, ]$BP
+      }
+      else {
+        lastbase = lastbase + max(d[d$index == (i - 1), 
+                                    "BP"])
+        d[d$index == i, "BP"] = d[d$index == i, "BP"] - 
+          min(d[d$index == i, "BP"]) + 1
+        d[d$index == i, "pos"] = d[d$index == i, "BP"] + 
+          lastbase
+      }
+    }
+    ticks <- tapply(d$pos, d$index, quantile, probs = 0.5)
+    xlabel = "Chromosome"
+    labs <- unique(d$CHR)
+  }
+  xmax = ceiling(max(d$pos) * 1.03)
+  xmin = floor(max(d$pos) * -0.03)
+  def_args <- list(xaxt = "n", bty = "n", xaxs = "i", yaxs = "i", 
+                   las = 1, pch = 20, xlim = c(xmin, xmax), ylim = c(0, 
+                                                                     ceiling(max(d$logp))), xlab = xlabel, ylab = expression(-log[10](italic(p))))
+  dotargs <- list(...)
+  do.call("plot", c(NA, dotargs, def_args[!names(def_args) %in% 
+                                            names(dotargs)]))
+  if (!is.null(chrlabs)) {
+    if (is.character(chrlabs)) {
+      if (length(chrlabs) == length(labs)) {
+        labs <- chrlabs
+      }
+      else {
+        warning("You're trying to specify chromosome labels but the number of labels != number of chromosomes.")
+      }
+    }
+    else {
+      warning("If you're trying to specify chromosome labels, chrlabs must be a character vector")
+    }
+  }
+  if (nchr == 1) {
+    axis(1, ...)
+  }
+  else {
+    axis(1, at = ticks, labels = labs, ...)
+  }
+  col = rep_len(col, max(d$index))
+  if (nchr == 1) {
+    with(d, points(pos, logp, pch = 20, col = col[1], ...))
+  }
+  else {
+    icol = 1
+    for (i in unique(d$index)) {
+      points(d[d$index == i, "pos"], d[d$index == i, "logp"], 
+             col = col[icol], pch = 20, ...)
+      icol = icol + 1
+    }
+  }
+  if (suggestiveline) 
+    abline(h = suggestiveline, col = "blue")
+  if (genomewideline) 
+    abline(h = genomewideline, col = "red")
+  if (!is.null(highlight)) {
+    if (any(!(highlight %in% d$SNP))) 
+      warning("You're trying to highlight SNPs that don't exist in your results.")
+    d.highlight = d[which(d$SNP %in% highlight), ]
+    with(d.highlight, points(pos, logp, col = "green3", pch = 20, 
+                             ...))
+  }
+  if (!is.null(annotatePval)) {
+    if (logp) {
+      topHits = subset(d, P <= annotatePval)
+    }
+    else topHits = subset(d, P >= annotatePval)
+    par(xpd = TRUE)
+    if (annotateTop == FALSE) {
+      if (logp) {
+        with(subset(d, P <= annotatePval), textxy(pos, 
+                                                  -log10(P), offset = 0.625, labs = topHits$SNP, 
+                                                  cex = txt_size), ...)
+      }
+      else with(subset(d, P >= annotatePval), textxy(pos, 
+                                                     P, offset = 0.625, labs = topHits$SNP, cex = txt_size), 
+                ...)
+    }
+    else {
+      topHits <- topHits[order(topHits$P), ]
+      topSNPs <- NULL
+      for (i in unique(topHits$CHR)) {
+        chrSNPs <- topHits[topHits$CHR == i, ]
+        topSNPs <- rbind(topSNPs, chrSNPs[1, ])
+      }
+      if(length(topSNPs) > 0)
+      {
+        if (logp) {
+          textxy(topSNPs$pos, 
+                 -log10(topSNPs$P) + .5 + runif(nrow(topSNPs), -.5, .5), 
+                 labs = topSNPs$SNP, cex = txt_size, font = 2,...)
+          # textxy(topSNPs$pos-1, -log10(topSNPs$P)+.25, offset = .10, 
+          #        labs = topSNPs$SNP, cex = txt_size, font = 2, ...)
+        }
+        else
+        {
+          textxy(topSNPs$pos, topSNPs$P, offset = 0.625, 
+                 labs = topSNPs$SNP, cex = txt_size, ...)
+        }
+      }
+    }
+  }
+  par(xpd = FALSE)
+}
+
+SNP_name = colnames(result_list)
+rs_ids = c("rs4360494", "rs61776719", "rs1003563", "rs11157993", "rs11623717", "rs2379128")
+SNP_sig = c("X1.38455891",  "X1.38461319",  "X12.6424577",  "X14.54411696", "X14.54414132", "X20.60898505")
+for(i in 1:length(SNP_sig))
+{
+  snp = SNP_sig[i]
+  SNP_name[which(SNP_name == snp)] = rs_ids[i]
+}
+
+manhattab_plot_data = data.frame(SNP_name = SNP_name,
+                                 chr = as.integer(sub("\\..*", "", gsub("X", "", colnames(result_list)))),
+                                 bp = as.integer(sub(".*\\.", "",  gsub("X", "", colnames(result_list)))), 
+                                 p_ate_aov = result_list["ATE_EM_pvalue", ], 
+                                 p_ate_lin = result_list["ATE_EM_lin_pvalue", ], 
+                                 p_mor_aov = result_list["MOR_EM_pvalue", ], 
+                                 p_mor_mult = result_list["MOR_EM_mult_pvalue", ]
+)
+```
+
+## Manhattan Plots for tlGxE 
+```{r}
+thresh = 5*10^-4
+pdf(file = "/Users/danielrud/Desktop/USC/Targeted Learning/Simulations_Manuscript/ukb_crc_man_plot.pdf", width = 10, height = 9)
+par(mfrow = c(2,2), mar = c(5, 5, 4, 2))
+
+set.seed(1)
+ate_aov_plot = manhattan(x =manhattab_plot_data, chr = "chr", 
+                         bp = "bp", p = "p_ate_aov", 
+                         snp = "SNP_name", 
+                         annotatePval = thresh, 
+                         suggestiveline = FALSE, 
+                         genomewideline = -1*log(thresh,10), 
+                         col = c("blue4", "orange3"), 
+                         main = "tlGxE ATE Codominant",
+                         txt_size = 1.2, 
+                         ylim = c(0,5), 
+                         cex.main = 1.5,                 # Increase plot title size
+                         cex.lab = 1.5,                  # Increase axis labels size
+                         cex.axis = 1.2,                 # Increase axis numbers size
+                         cex.sub = 1.2, 
+                         offset = -.2
+)
+set.seed(8)
+ate_lin_plot = manhattan(x =manhattab_plot_data, chr = "chr", 
+                         bp = "bp", p = "p_ate_lin", 
+                         snp = "SNP_name", 
+                         annotatePval = thresh, 
+                         suggestiveline = FALSE, 
+                         genomewideline = -1*log(thresh,10), 
+                         col = c("blue4", "orange3"),
+                         main = "tlGxE ATE Additive", 
+                         txt_size = 1.2, 
+                         ylim = c(0,5), 
+                         cex.main = 1.5,                 # Increase plot title size
+                         cex.lab = 1.5,                  # Increase axis labels size
+                         cex.axis = 1.2,                 # Increase axis numbers size
+                         cex.sub = 1.2, 
+                         offset = 0
+)
+set.seed(8)
+mor_aov_plot = manhattan(x =manhattab_plot_data, chr = "chr", 
+                       bp = "bp", p = "p_mor_aov", 
+                         snp = "SNP_name", 
+                         annotatePval = thresh, 
+                         suggestiveline = FALSE, 
+                         genomewideline = -1*log(thresh,10), 
+                         col = c("blue4", "orange3"),
+                         main = "tlGxE MOR Codominant", 
+                         txt_size = 1.2, 
+                         ylim = c(0,5), 
+                         cex.main = 1.5,                 # Increase plot title size
+                         cex.lab = 1.5,                  # Increase axis labels size
+                         cex.axis = 1.2,                 # Increase axis numbers size
+                         cex.sub = 1.2, 
+                         offset = 0
+)
+mor_mult_plot = manhattan(x =manhattab_plot_data, chr = "chr", 
+                          bp = "bp", p = "p_mor_mult", 
+                          snp = "SNP_name", 
+                          annotatePval = thresh, 
+                          suggestiveline = FALSE, 
+                          genomewideline = -1*log(thresh,10), 
+                          col = c("blue4", "orange3"),
+                          main = "tlGxE MOR Additive", 
+                          txt_size = 1.2, 
+                          ylim = c(0,5), 
+                         cex.main = 1.5,                 # Increase plot title size
+                         cex.lab = 1.5,                  # Increase axis labels size
+                         cex.axis = 1.2,                 # Increase axis numbers size
+                         cex.sub = 1.2   
+)
+dev.off()
+```
+
+## Code to perform RERI testing -- includes commented implementation of linear odds model 
+```{r}
+library(car)
+# n = 10000
+# G = rbinom(n = n, size = 2, prob = .3)
+# E = rbinom(n = n, size = 1, prob = .5)
+# C = cbind(rnorm(n), rnorm(n))
+# 
+# odds_pi_i = exp(.2)*(1 + 0*G*E + .5*E + .2*G + .2*C[,1] + .1*C[,2])
+# pi_i = odds_pi_i / (1+odds_pi_i)
+# Y = rbinom(length(pi_i), size = 1, pi_i)
+
+# linear_odds_neg_ll = function(B,design_matrix, y_vec) # log likelihood
+# {
+#   odds_pi_i <- pmax(exp(B[1]) * (1 + design_matrix %*% matrix(B[-1], ncol = 1)), 1e-10)
+#   pi_i = odds_pi_i / (1+odds_pi_i)
+#   ll = ifelse(y_vec == 1, pi_i, 1-pi_i) %>% log %>% sum(na.rm = F)
+#   return(-1*ll)
+# } 
+
+# linear_odds_neg_ll_reparam = function(B,design_matrix, y_vec) # log likelihood
+# {
+#   odds_pi_i = exp(B[1]  + log(pmax.int(1 + design_matrix %*% matrix(B[-1], ncol = 1), 1e-6)))
+#   pi_i = odds_pi_i / (1+odds_pi_i)
+#   ll = sum(log(pi_i[y_vec == 1])) + sum(log(1 - pi_i[y_vec == 0]))
+#   return(-1*ll)
+# } 
+# 
+# reri_model = function(Y, E, G, C)
+# {
+  # n = 14000
+  # G = rbinom(n = n, size = 2, prob = .3)
+  # E = rbinom(n = n, size = 1, prob = .5)
+  # C = cbind(rnorm(n), rnorm(n))
+  # 
+  # odds_pi_i = exp(.2)*(1 + 0*G*E + .5*E + .2*G + .2*C[,1] + .1*C[,2])
+  # pi_i = odds_pi_i / (1+odds_pi_i)
+  # Y = rbinom(length(pi_i), size = 1, pi_i)
+#   # start with additive test ##############################
+#   design_matrix = as.matrix(cbind(E*G, E, G, C)) 
+#   #         B0 BEG BE BG
+#   B_init = c(0, 0, 0, 0,  rep(0,ncol(C)))
+#   
+#   add_RERI <- optim(B_init,linear_odds_neg_ll_reparam, 
+#                    design_matrix = design_matrix, 
+#                    method = "Nelder-Mead",
+#                    y_vec = Y,
+#                    hessian = T, 
+#                    control = list(maxit = 5000))
+#   
+#   coef_vec = add_RERI$par
+#   names(coef_vec) = paste0("b", 1:length(coef_vec))
+#   
+#   RERI_add_effect = add_RERI$par[2]
+#   RERI_add_cond_exp_effect = c(add_RERI$par[3], add_RERI$par[3] + RERI_add_effect, add_RERI$par[3] + 2*RERI_add_effect )
+#   RERI_add_vcov = Matrix::nearPD(MASS::ginv(add_RERI$hessian))$mat
+#   rownames(RERI_add_vcov) = names(coef_vec); colnames(RERI_add_vcov) = names(coef_vec)
+#   RERI_add_var = RERI_add_vcov[2,2]
+#   RERI_Z = RERI_add_effect / sqrt(RERI_add_var)
+#   RERI_add_pvalue = 2*(1-pnorm(abs(RERI_Z)))
+#   RERI_add_se = c(
+#     deltaMethod(coef_vec, "b3", vcov = RERI_add_vcov)$SE, 
+#     deltaMethod(coef_vec, "b3 + b2", vcov = RERI_add_vcov)$SE, 
+#     deltaMethod(coef_vec, "b3 + 2*b2", vcov = RERI_add_vcov)$SE
+#   )
+#   ############################################################
+#   # Codominant RERI Test 
+#   
+#   # full model 
+#   G = round(G)
+#   design_matrix = as.matrix(cbind(E*(G == 1), E*(G == 2), E, 1*(G == 1), 1*(G == 2),  C)) 
+#   B_init = rep(0, ncol(design_matrix) + 1)
+#   
+#   CD_full_RERI <- optim(B_init,linear_odds_neg_ll_reparam, 
+#                    design_matrix = design_matrix, 
+#                    method = "Nelder-Mead",
+#                    y_vec = Y,
+#                    hessian = T, 
+#                    control = list(maxit = 5000))
+#   
+#   ll_CD_full = -1*CD_full_RERI$value
+#   
+#   # nested model 
+#   design_matrix = as.matrix(cbind(E, 1*(G == 1), 1*(G == 2),  C)) 
+#   B_init = rep(0, ncol(design_matrix) + 1)
+#   CD_nested_RERI <- optim(B_init,linear_odds_neg_ll_reparam, 
+#                    design_matrix = design_matrix, 
+#                    method = "Nelder-Mead",
+#                    y_vec = Y,
+#                    hessian = T, 
+#                    control = list(maxit = 5000))
+#   
+#   ll_CD_nested = -1*CD_nested_RERI$value
+#   
+#   chi_sq = -2*(ll_CD_nested - ll_CD_full)
+#   
+#   CD_chi_sq_p = 1 - pchisq(chi_sq, df = 2)
+#   CD_chi_sq_p
+#   
+#   RERI_codominant_cond_exp_effect = c(CD_full_RERI$par[4], CD_full_RERI$par[4] + CD_full_RERI$par[2], 
+#                                        CD_full_RERI$par[4] + CD_full_RERI$par[3])
+#   RERI_codom_vcov = Matrix::nearPD(MASS::ginv(CD_full_RERI$hessian))$mat
+#   coef_vec = CD_full_RERI$par
+#   names(coef_vec) = paste0("b", 1:length(coef_vec))
+#   colnames(RERI_codom_vcov) =  names(coef_vec); rownames(RERI_codom_vcov) =  names(coef_vec)
+#   
+#   RERI_codom_se = c(
+#     deltaMethod(coef_vec, "b4", vcov = RERI_codom_vcov)$SE, 
+#     deltaMethod(coef_vec, "b4 + b2", vcov = RERI_codom_vcov)$SE, 
+#     deltaMethod(coef_vec, "b4 + b3", vcov = RERI_codom_vcov)$SE
+#   )
+#   
+#   
+#   
+#   return(
+#     list(RERI_add = c(RERI_add_effect = RERI_add_effect, RERI_add_var = RERI_add_var, 
+#                       RERI_add_pvalue = RERI_add_pvalue, RERI_add_cond_exp_effect = RERI_add_cond_exp_effect, 
+#                       RERI_add_se = RERI_add_se), 
+#          RERI_cod = c(RERI_cod_p = CD_chi_sq_p, RERI_codominant_cond_effect = RERI_codominant_cond_exp_effect, 
+#                       RERI_codom_se = RERI_codom_se))
+#   )
+# }
+
+reri_model = function(Y, E, G, C)
+{
+  # n = 14000
+  # G = rbinom(n = n, size = 2, prob = .3)
+  # E = rbinom(n = n, size = 1, prob = .5)
+  # C = cbind(rnorm(n), rnorm(n))
+  # 
+  # odds_pi_i = exp(.2)*(1 + 0*G*E + .5*E + .2*G + .2*C[,1] + .1*C[,2])
+  # pi_i = odds_pi_i / (1+odds_pi_i)
+  # Y = rbinom(length(pi_i), size = 1, pi_i)
+  
+  data = data.frame(Y = Y, E = E, G = G, C = C)
+  colnames(data)[1:3] = c("Y", "E", "G")
+  formula = Y ~ . + E:G
+  
+  glm_mult = glm(formula, data = data, family = "binomial")
+  
+  coef_vec = coef(glm_mult)
+  cov_mat = vcov(glm_mult)
+  
+  # G = 1
+  P10 = "exp(G)"
+  P01 = "exp(E)"
+  P11 = "exp(G + E + `E:G`)"
+  
+  RERI_1 = paste0(P11,"  - ",P10," - ",P01," + 1")
+  
+  # G = 2
+  P10 = "exp(2*G)"
+  P01 = "exp(E)"
+  P11 = "exp(2*G + E + 2*`E:G`)"
+  
+  RERI_2 =  paste0(P11,"  - ",P10," - ",P01," + 1")
+  
+  
+  
+  RERI_effects = list(
+    RERI_G_1 = deltaMethod(coef_vec, RERI_1, vcov = cov_mat), 
+    RERI_G_2 = deltaMethod(coef_vec, RERI_2, vcov = cov_mat)
+  )
+  
+  RERI_add_effect = RERI_effects$RERI_G_1$Estimate
+  RERI_add_cond_exp_effect = c(RERI_effects$RERI_G_1$Estimate, RERI_effects$RERI_G_2$Estimate)
+  RERI_Z = RERI_add_effect /  RERI_effects$RERI_G_1$SE
+  RERI_add_pvalue = 2*(1-pnorm(abs(RERI_Z)))
+  RERI_add_se = c(
+    RERI_effects$RERI_G_1$SE, RERI_effects$RERI_G_2$SE
+  )
+  
+  return(
+    list(RERI_add = c(RERI_add_effect = RERI_add_effect, 
+                      RERI_add_pvalue = RERI_add_pvalue, RERI_add_cond_exp_effect = RERI_add_cond_exp_effect, 
+                      RERI_add_se = RERI_add_se))
+  )
+}
+
+
+```
+
+# Perform Interaction Scan for Smoking using Standard GxE and RERI 
+
+```{r}
+library(car) # for delta method 
+UKB_CRC_smk =readRDS("~/Desktop/USC/Targeted Learning/Simulations_Manuscript/UKB_analysis/OneDrive_1_10-30-2024/UKB_CRC_smk.rds")
+
+smk_results = list()
+SNP_names = setdiff(colnames(UKB_CRC_smk)[-c(1:10)], names(rm_snps))
+outcome = "outc"
+exposure = "smk_ever"
+confounders = c("age_ref_imp", "pc1", "pc2","pc3", "bmi10", "male")
+confounder_formula = paste(outcome, "~", paste(confounders, collapse = "+"))
+
+C = model.matrix(formula(paste("~", paste(confounders, collapse = "+"))), data = UKB_CRC_smk)[,-1]
+
+options(future.globals.maxSize = 8000 * 1024^2)
+plan(multisession, workers = 10)
+
+# GWIS performed here! 
+smk_results = future_lapply(1:length(SNP_names), FUN = function(i)
+{
+  curr_SNP = SNP_names[i]
+  interaction_term = paste(exposure, "*", curr_SNP)
+  model_formula = paste(confounder_formula, "+", interaction_term) %>% formula
+  
+  # fit glm additive 
+  gwis_model = glm(formula = model_formula, family = "binomial", data = UKB_CRC_smk)
+  
+  # 1df multiplicative 
+  mult_int_term = paste0(exposure, ":", curr_SNP)
+  mult_gxe_effect = gwis_model$coefficients[mult_int_term] 
+  mult_gxe_pvalue = summary(gwis_model)$coefficients[mult_int_term, 4]
+  mult_gxe_additive_COR = exp(c(coef(gwis_model)[exposure],coef(gwis_model)[exposure] + mult_gxe_effect, coef(gwis_model)[exposure] + 2*mult_gxe_effect))
+  cov_mat = vcov(gwis_model)
+  mult_gxe_additive_COR_se = c(deltaMethod(coef(gwis_model), "exp(smk_ever)", cov_mat)$SE, 
+                               deltaMethod(coef(gwis_model), paste0("exp(smk_ever + `",exposure, ":",curr_SNP, "`)"), cov_mat)$SE, 
+                                deltaMethod(coef(gwis_model), paste0("exp(smk_ever + 2*`",exposure, ":",curr_SNP, "`)"), cov_mat)$SE           
+                               )
+  
+  # fit glm codominant 
+  curr_SNP = SNP_names[i]
+  model_formula_full = paste(confounder_formula,"+", exposure, "*I(round(", curr_SNP, ") == 1) + ",exposure, "*I(round(", curr_SNP, ") == 2) + ",
+                        exposure, "+", "I(round(", curr_SNP, ") == 1) + ", "I(round(", curr_SNP, ") == 2)") %>% formula
+  
+  model_formula_nested = paste(confounder_formula,"+", exposure, "+", "I(round(", curr_SNP, ") == 1) + I(round(", curr_SNP, ") == 2)") %>% formula
+  
+  full_mod = glm(formula = model_formula_full, family = "binomial", data = UKB_CRC_smk)
+  nested_mod = glm(formula = model_formula_nested, family = "binomial", data = UKB_CRC_smk)
+  
+  mult_codom_chisq = -2*(logLik(nested_mod) - logLik(full_mod))
+  mult_codom_p = 1 - pchisq(mult_codom_chisq, df = 2)
+  mult_codom_COR = exp(c(coef(full_mod)[exposure],
+                         coef(full_mod)[exposure] + coef(full_mod)[paste0("", exposure, ":I(round(", curr_SNP, ") == 1)TRUE")], 
+                         coef(full_mod)[exposure] + coef(full_mod)[paste0("", exposure, ":I(round(", curr_SNP, ") == 2)TRUE")]))
+  cov_mat = vcov(full_mod)
+  mult_codom_COR_se = c(deltaMethod(coef(full_mod), "exp(smk_ever)", cov_mat)$SE, 
+                        deltaMethod(coef(full_mod), paste0("exp(smk_ever + `", exposure, ":I(round(", curr_SNP, ") == 1)TRUE`)"), cov_mat)$SE, 
+                        deltaMethod(coef(full_mod), paste0("exp(smk_ever + `", exposure, ":I(round(", curr_SNP, ") == 2)TRUE`)"), cov_mat)$SE
+                        )
+  # RERI Testing 
+  
+  reri_testing = reri_model(Y = UKB_CRC_smk$outc, E = UKB_CRC_smk$smk_ever, 
+                            G = UKB_CRC_smk[curr_SNP], C = C)
+  
+  
+  gwis_results = c(mult_add_effect = mult_gxe_effect, 
+                   mult_add_pvalue = mult_gxe_pvalue, 
+                   mult_add_CORs = mult_gxe_additive_COR, 
+                   mult_add_COR_se = mult_gxe_additive_COR_se, 
+                   mult_codom_pvalue = mult_codom_p, 
+                   mult_codom_CORs = mult_codom_COR, 
+                   mult_codom_COR_se = mult_codom_COR_se, 
+                   reri_add_effect = reri_testing$RERI_add["RERI_add_effect"],
+                   reri_add_pvalue = reri_testing$RERI_add["RERI_add_pvalue"],
+                   reri_add_CORs = reri_testing$RERI_add[3:4], 
+                   reri_add_COR_se =  reri_testing$RERI_add[5:6])
+  
+  return(gwis_results)
+  
+})
+
+plan(sequential)
+
+# saveRDS(smk_results, "/Users/danielrud/Desktop/USC/Targeted Learning/Simulations_Manuscript/standard_methods_scan.RDS")
+# smk_results = readRDS("/Users/danielrud/Desktop/USC/Targeted Learning/Simulations_Manuscript/standard_methods_scan.RDS")
+smk_SNP_results = do.call(rbind,smk_results)
+colnames(smk_SNP_results) = sub("\\..*", "", colnames(smk_SNP_results))
+rownames(smk_SNP_results) = SNP_names
+smk_SNP_results = data.frame(smk_SNP_results)
+
+
+sig_thresh = 5*10^-4
+list(
+  GxE_mult_add = smk_SNP_results[which(smk_SNP_results[,"mult_add_pvalue"] < sig_thresh), , drop = F] %>% round(8), 
+  GxE_mult_codom = smk_SNP_results[which(smk_SNP_results[,"mult_codom_pvalue" ] <sig_thresh), , drop = F] %>% round(8), 
+  RERI_add = smk_SNP_results[which(smk_SNP_results[,"reri_add_pvalue" ] < sig_thresh), , drop = F] %>% round(8)
+)
+
+smk_SNP_results$chr = as.integer(sub("\\..*", "", gsub("X", "", rownames(smk_SNP_results))))
+smk_SNP_results$bp = as.integer(sub(".*\\.", "",  gsub("X", "", rownames(smk_SNP_results))))
+smk_SNP_results$SNP_names = rownames(smk_SNP_results)
+
+
+smk_SNP_results$SNP_names[which(smk_SNP_results$SNP_names == "X1.38461319")] = "rs61776719"
+smk_SNP_results$SNP_names[which(smk_SNP_results$SNP_names == "X12.6424577")] = "rs1003563"
+smk_SNP_results$SNP_names[which(smk_SNP_results$SNP_names == "X14.54414132")] = "rs11623717"
+smk_SNP_results$SNP_names[which(smk_SNP_results$SNP_names == "X20.60898505")] = "rs2379128"
+
+# rename significant SNPs with RSIDs 
+
+```
+
+
+# Latex Table for Standard Methods -- Table 2
+
+```{r}
+results_for_table = smk_SNP_results[which(smk_SNP_results[, "mult_add_pvalue" ] < level |
+                                          smk_SNP_results[, "mult_codom_pvalue"] <level |
+                                          smk_SNP_results[, "reri_add_pvalue"] < level), , drop = F] 
+snp_bp_chr = rownames(results_for_table)
+
+rs_ids = c("rs4360494", "rs61776719", "rs1003563", "rs11157993", "rs11623717", "rs12898159", "rs2379128")
+rownames(results_for_table) = rs_ids
+results_for_table = results_for_table[-24]
+
+chr = as.integer(sub("\\..*", "", gsub("X", "", snp_bp_chr)))
+bp = as.integer(sub(".*\\.", "",  gsub("X", "", snp_bp_chr))) 
+
+results_for_table = cbind(rs_ids,chr, bp, results_for_table)
+
+latex_table = ""
+p_thresh = 5*10^-4
+for(i in 1:nrow(results_for_table))
+{
+  latex_table = paste(latex_table, "& & & &", paste(results_for_table[i, c(21:22)] %>% round(3), collapse = " & " ))
+  for(j in c(20))
+  {
+    if(as.numeric(results_for_table[i, j]) <= p_thresh)
+    {
+      latex_table = paste(latex_table, "& & \\textbf{", results_for_table[i, j] %>% round(4), "}") 
+      
+    }else
+    {
+      latex_table = paste(latex_table, "& &" , results_for_table[i, j] %>% round(4)) 
+    }
+  }
+  
+  latex_table = paste(latex_table, "\\\\ \\textbf{",results_for_table[i,1], "}")
+  latex_table = paste(latex_table, "&", paste(results_for_table[i, c(2, 3, 13:15)] %>% round(2), collapse = " & "))
+   for(j in c(12,5))
+  {
+    if(as.numeric(results_for_table[i, j]) <= p_thresh)
+    {
+      latex_table = paste(latex_table, "& \\textbf{", results_for_table[i, j] %>% round(4), "}") 
+      
+    }else
+    {
+      latex_table = paste(latex_table, "&" , results_for_table[i, j] %>% round(4)) 
+    }
+  }
+  latex_table = paste(latex_table, " \\\\ \\hline")
+}
+
+cat(latex_table)
+```
+
+
+# RERI and Standard GxE Manhattan Plots
+
+```{r}
+# results for RERI and MULT GxE 
+# this seed is for the random jitter in the manhattan function 
+thresh = 5*10^-4
+pdf(file = "/Users/danielrud/Desktop/USC/Targeted Learning/Simulations_Manuscript/ukb_crc_gxe_mult_reri.pdf", width = 10, height = 9)
+layout(matrix(c(1,1, 2,2, 0, 3, 3, 0), nrow = 2, byrow = TRUE))
+par( mar = c(5, 5, 4, 2))
+
+set.seed(1)
+gxe_codom_plot = manhattan(x =smk_SNP_results, chr = "chr", 
+                         bp = "bp", p = "mult_codom_pvalue", 
+                         snp = "SNP_names", 
+                         annotatePval = thresh, 
+                         suggestiveline = FALSE, 
+                         genomewideline = -1*log(thresh,10), 
+                         col = c("blue4", "orange3"),
+                         main = "GxE Codominant", 
+                         txt_size = 1.5, 
+                         ylim = c(0,5), 
+                         cex.main = 2,                 # Increase plot title size
+                         cex.lab = 2,                  # Increase axis labels size
+                         cex.axis = 1.5,                 # Increase axis numbers size
+                         cex.sub = 1.5, 
+                         offset = .4)
+
+gxe_add_plot = manhattan(x =smk_SNP_results, chr = "chr", 
+                         bp = "bp", p = "mult_add_pvalue", 
+                         snp = "SNP_names", 
+                         annotatePval = thresh, 
+                         suggestiveline = FALSE, 
+                         genomewideline = -1*log(thresh,10), 
+                         col = c("blue4", "orange3"),
+                         main = "GxE Additive", 
+                         txt_size = 1.5, 
+                         ylim = c(0,5), 
+                         cex.main = 2,                 # Increase plot title size
+                         cex.lab = 2,                  # Increase axis labels size
+                         cex.axis = 1.5,                 # Increase axis numbers size
+                         cex.sub = 1.5)
+
+#22
+set.seed(24)
+reri_add_plot = manhattan(x =smk_SNP_results, chr = "chr", 
+                         bp = "bp", p = "reri_add_pvalue", 
+                         snp = "SNP_names", 
+                         annotatePval = thresh, 
+                         suggestiveline = FALSE, 
+                         genomewideline = -1*log(thresh,10), 
+                         col = c("blue4", "orange3"),
+                         main = "RERI", 
+                        txt_size = 1.5, 
+                         ylim = c(0,5), 
+                         cex.main = 2,                 # Increase plot title size
+                         cex.lab = 2,                  # Increase axis labels size
+                         cex.axis = 1.5,                 # Increase axis numbers size
+                         cex.sub = 1.5, 
+                         offset = -.1)
+
+
+dev.off()
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
